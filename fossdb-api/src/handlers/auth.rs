@@ -61,18 +61,16 @@ async fn register_user(
 
     let mut user_value = serde_json::to_value(&user)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    match users_db.save(&mut user_value).await {
-        Ok(_) => {
-            let token = create_jwt(&user.id, &user.username)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            
-            Ok(Json(AuthResponse {
-                token,
-                user_id: user.id,
-            }))
-        }
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-    }
+    users_db.save(&mut user_value).await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    
+    let token = create_jwt(&user.id, &user.username)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    
+    Ok(Json(AuthResponse {
+        token,
+        user_id: user.id,
+    }))
 }
 
 pub async fn login(

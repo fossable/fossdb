@@ -76,6 +76,11 @@ pub async fn create_package(
         created_at: Utc::now(),
         updated_at: Utc::now(),
         submitted_by: None,
+        platform: None,
+        language: None,
+        status: None,
+        dependents_count: None,
+        rank: None,
     };
 
     let mut package_value = serde_json::to_value(&package)

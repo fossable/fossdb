@@ -13,9 +13,10 @@ pub struct Database {
 
 impl Database {
     pub async fn new() -> Result<Self> {
-        let couchdb_url = std::env::var("COUCHDB_URL").unwrap_or_else(|_| "http://localhost:5984".to_string());
-        let couchdb_username = std::env::var("COUCHDB_USERNAME").unwrap_or_else(|_| "admin".to_string());
-        let couchdb_password = std::env::var("COUCHDB_PASSWORD").unwrap_or_else(|_| "password".to_string());
+        let config = crate::config::Config::from_env();
+        let couchdb_url = config.couchdb_url;
+        let couchdb_username = config.couchdb_username;
+        let couchdb_password = config.couchdb_password;
         
         let client = Client::new(&couchdb_url, &couchdb_username, &couchdb_password)?;
         

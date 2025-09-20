@@ -17,6 +17,11 @@ pub struct Package {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub submitted_by: Option<String>,
+    pub platform: Option<String>,
+    pub language: Option<String>,
+    pub status: Option<String>,
+    pub dependents_count: Option<u32>,
+    pub rank: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,7 +44,8 @@ pub struct PackageVersion {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dependency {
     pub name: String,
-    pub version_constraint: String,
+    pub version_requirement: String,
+    pub dependency_type: String,
     pub optional: bool,
 }
 

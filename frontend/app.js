@@ -22,6 +22,9 @@ document.addEventListener('DOMContentLoaded', function() {
             evt.detail.headers['Authorization'] = 'Bearer ' + authToken;
         }
     });
+    
+    // Clear auth errors when user starts typing
+    setupAuthErrorClearing();
 });
 
 function checkAuthStatus() {
@@ -140,6 +143,12 @@ window.hideLogin = function() {
     // Clear response messages
     const response = document.getElementById('login-response');
     if (response) response.innerHTML = '';
+    
+    // Remove any shake animation
+    const formContainer = modal.querySelector('.bg-gray-800');
+    if (formContainer) {
+        formContainer.classList.remove('animate-shake');
+    }
 };
 
 window.showRegister = function() {
@@ -166,6 +175,12 @@ window.hideRegister = function() {
     // Clear response messages
     const response = document.getElementById('register-response');
     if (response) response.innerHTML = '';
+    
+    // Remove any shake animation
+    const formContainer = modal.querySelector('.bg-gray-800');
+    if (formContainer) {
+        formContainer.classList.remove('animate-shake');
+    }
 };
 
 window.showModal = function() {
@@ -195,6 +210,187 @@ window.logout = function() {
     // Show success message
     showNotification('Logged out successfully', 'success');
 };
+
+// Email validation function
+function isValidEmail(email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+}
+
+// Show email validation error
+function showEmailError(type, email) {
+    const message = email.length === 0 ? 
+        'Email address is required.' :
+        'Please enter a valid email address (e.g., user@example.com).';
+    
+    // Add visual indication to the email field
+    const emailInput = document.querySelector(`#${type}-modal input[type="email"]`);
+    if (emailInput) {
+        emailInput.classList.add('border-red-500', 'ring-red-400');
+        emailInput.classList.remove('border-gray-600', 'ring-blue-400');
+    }
+    
+    showAuthError(type, message);
+}
+
+// Clear email field error styling
+function clearEmailError(type) {
+    const emailInput = document.querySelector(`#${type}-modal input[type="email"]`);
+    if (emailInput) {
+        emailInput.classList.remove('border-red-500', 'ring-red-400');
+        emailInput.classList.add('border-gray-600');
+    }
+}
+
+// Setup error clearing and validation on input
+function setupAuthErrorClearing() {
+    // Setup login form validation
+    const loginEmailInput = document.querySelector('#login-modal input[type="email"]');
+    const loginPasswordInput = document.querySelector('#login-modal input[type="password"]');
+    const loginForm = document.querySelector('#login-modal form');
+    
+    if (loginEmailInput) {
+        loginEmailInput.addEventListener('input', function() {
+            const response = document.getElementById('login-response');
+            if (response && response.innerHTML.includes('bg-red-500')) {
+                response.innerHTML = '';
+            }
+            clearEmailError('login');
+        });
+        
+        loginEmailInput.addEventListener('blur', function() {
+            const email = this.value.trim();
+            if (email.length > 0 && !isValidEmail(email)) {
+                showEmailError('login', email);
+            }
+        });
+    }
+    
+    if (loginPasswordInput) {
+        loginPasswordInput.addEventListener('input', function() {
+            const response = document.getElementById('login-response');
+            if (response && response.innerHTML.includes('bg-red-500')) {
+                response.innerHTML = '';
+            }
+        });
+    }
+    
+    if (loginForm) {
+        loginForm.addEventListener('submit', function(e) {
+            const email = loginEmailInput.value.trim();
+            if (!isValidEmail(email)) {
+                e.preventDefault();
+                e.stopPropagation();
+                showEmailError('login', email);
+                return false;
+            }
+        });
+    }
+    
+    // Setup register form validation
+    const registerEmailInput = document.querySelector('#register-modal input[type="email"]');
+    const registerUsernameInput = document.querySelector('#register-modal input[type="text"]');
+    const registerPasswordInput = document.querySelector('#register-modal input[type="password"]');
+    const registerForm = document.querySelector('#register-modal form');
+    
+    if (registerEmailInput) {
+        registerEmailInput.addEventListener('input', function() {
+            const response = document.getElementById('register-response');
+            if (response && response.innerHTML.includes('bg-red-500')) {
+                response.innerHTML = '';
+            }
+            clearEmailError('register');
+        });
+        
+        registerEmailInput.addEventListener('blur', function() {
+            const email = this.value.trim();
+            if (email.length > 0 && !isValidEmail(email)) {
+                showEmailError('register', email);
+            }
+        });
+    }
+    
+    if (registerUsernameInput) {
+        registerUsernameInput.addEventListener('input', function() {
+            const response = document.getElementById('register-response');
+            if (response && response.innerHTML.includes('bg-red-500')) {
+                response.innerHTML = '';
+            }
+        });
+    }
+    
+    if (registerPasswordInput) {
+        registerPasswordInput.addEventListener('input', function() {
+            const response = document.getElementById('register-response');
+            if (response && response.innerHTML.includes('bg-red-500')) {
+                response.innerHTML = '';
+            }
+        });
+    }
+    
+    if (registerForm) {
+        registerForm.addEventListener('submit', function(e) {
+            const email = registerEmailInput.value.trim();
+            const username = registerUsernameInput.value.trim();
+            const password = registerPasswordInput.value.trim();
+            
+            // Validate email
+            if (!isValidEmail(email)) {
+                e.preventDefault();
+                e.stopPropagation();
+                showEmailError('register', email);
+                return false;
+            }
+            
+            // Validate username
+            if (username.length < 3) {
+                e.preventDefault();
+                e.stopPropagation();
+                showAuthError('register', 'Username must be at least 3 characters long.');
+                return false;
+            }
+            
+            // Validate password
+            if (password.length < 6) {
+                e.preventDefault();
+                e.stopPropagation();
+                showAuthError('register', 'Password must be at least 6 characters long.');
+                return false;
+            }
+        });
+    }
+}
+
+// Auth error display function
+function showAuthError(type, message) {
+    const responseId = type === 'login' ? 'login-response' : 'register-response';
+    const responseElement = document.getElementById(responseId);
+    
+    if (responseElement) {
+        responseElement.innerHTML = `
+            <div class="p-3 mb-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+                <div class="flex items-center space-x-3">
+                    <svg class="w-5 h-5 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <div class="text-sm text-red-300">${message}</div>
+                </div>
+            </div>
+        `;
+        
+        // Add shake animation to the form
+        const modal = document.getElementById(`${type}-modal`);
+        if (modal) {
+            const formContainer = modal.querySelector('.bg-gray-800');
+            if (formContainer) {
+                formContainer.classList.add('animate-shake');
+                setTimeout(() => {
+                    formContainer.classList.remove('animate-shake');
+                }, 600);
+            }
+        }
+    }
+}
 
 // Enhanced notification system
 function showNotification(message, type = 'info') {
@@ -245,6 +441,18 @@ function setupHTMXHandlers() {
                     </div>
                 `;
             }
+            
+            // Show loading state in auth forms
+            if (target.id === 'login-response' || target.id === 'register-response') {
+                target.innerHTML = `
+                    <div class="flex items-center justify-center p-3 mb-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                        <div class="flex items-center space-x-3">
+                            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400"></div>
+                            <div class="text-sm text-blue-300">Authenticating...</div>
+                        </div>
+                    </div>
+                `;
+            }
         }
     });
     
@@ -280,28 +488,70 @@ function setupHTMXHandlers() {
         
         // Handle auth responses
         if (evt.detail.xhr.responseURL && evt.detail.xhr.responseURL.includes('/api/auth/')) {
+            const isLogin = evt.detail.xhr.responseURL.includes('/login');
+            const isRegister = evt.detail.xhr.responseURL.includes('/register');
+            
             if (evt.detail.xhr.status === 200) {
                 try {
                     const data = JSON.parse(evt.detail.xhr.responseText);
                     if (data.token) {
-                        authToken = data.token;
-                        currentUser = { username: data.user_id || 'User' };
+                        // Show success state briefly before closing
+                        const responseId = isLogin ? 'login-response' : 'register-response';
+                        const responseElement = document.getElementById(responseId);
                         
-                        localStorage.setItem('auth_token', authToken);
-                        localStorage.setItem('user_data', JSON.stringify(currentUser));
+                        if (responseElement) {
+                            responseElement.innerHTML = `
+                                <div class="p-3 mb-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+                                    <div class="flex items-center space-x-3">
+                                        <svg class="w-5 h-5 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                        </svg>
+                                        <div class="text-sm text-green-300">Success! Redirecting...</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
                         
-                        updateAuthUI();
-                        hideLogin();
-                        hideRegister();
-                        showHome();
-                        
-                        showNotification('Successfully logged in!', 'success');
+                        // Delay the redirect slightly to show success message
+                        setTimeout(() => {
+                            authToken = data.token;
+                            currentUser = { username: data.user_id || 'User' };
+                            
+                            localStorage.setItem('auth_token', authToken);
+                            localStorage.setItem('user_data', JSON.stringify(currentUser));
+                            
+                            updateAuthUI();
+                            hideLogin();
+                            hideRegister();
+                            showHome();
+                            
+                            const action = isRegister ? 'registered' : 'logged in';
+                            showNotification(`Successfully ${action}!`, 'success');
+                        }, 800);
                     }
                 } catch (error) {
-                    showNotification('Authentication error', 'error');
+                    const errorMsg = 'Authentication response error. Please try again.';
+                    showNotification(errorMsg, 'error');
+                    showAuthError(isLogin ? 'login' : 'register', errorMsg);
                 }
             } else {
-                showNotification('Authentication failed. Please check your credentials.', 'error');
+                // Handle different error status codes
+                let errorMessage = 'Authentication failed. Please try again.';
+                
+                if (evt.detail.xhr.status === 401) {
+                    errorMessage = isLogin ? 
+                        'Invalid email or password. Please check your credentials and try again.' :
+                        'Account creation failed. Email may already be in use.';
+                } else if (evt.detail.xhr.status === 400) {
+                    errorMessage = 'Invalid request. Please check your input and try again.';
+                } else if (evt.detail.xhr.status === 429) {
+                    errorMessage = 'Too many attempts. Please wait before trying again.';
+                } else if (evt.detail.xhr.status >= 500) {
+                    errorMessage = 'Server error. Please try again later.';
+                }
+                
+                showNotification(errorMessage, 'error');
+                showAuthError(isLogin ? 'login' : 'register', errorMessage);
             }
         }
     });
@@ -822,6 +1072,16 @@ style.textContent = `
             transform: translateX(0);
             opacity: 1;
         }
+    }
+    
+    .animate-shake {
+        animation: shake 0.6s ease-in-out;
+    }
+    
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }
+        20%, 40%, 60%, 80% { transform: translateX(8px); }
     }
 `;
 document.head.appendChild(style);

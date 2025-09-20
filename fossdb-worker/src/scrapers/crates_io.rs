@@ -2,9 +2,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use crate::models::{Scraper, ScrapedPackage, ScrapedVersion, Dependency};
+use crate::models::{Scraper, ScrapedPackage, ScrapedVersion};
 
 pub struct CratesIoScraper {
     client: Client,
@@ -120,6 +120,11 @@ impl Scraper for CratesIoScraper {
                     maintainers: Vec::new(), // Would need additional API call
                     tags: vec!["rust".to_string(), "crate".to_string()],
                     versions,
+                    platform: Some("crates.io".to_string()),
+                    language: Some("rust".to_string()),
+                    status: None,
+                    dependents_count: None,
+                    rank: None,
                 };
 
                 packages.push(package);

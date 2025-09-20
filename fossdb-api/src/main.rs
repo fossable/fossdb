@@ -1,11 +1,9 @@
 use axum::{
-    extract::State,
-    http::StatusCode,
     response::Json,
     routing::{get, post},
     Router,
 };
-use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber;
@@ -14,6 +12,7 @@ mod models;
 mod db;
 mod handlers;
 mod auth;
+mod config;
 
 use db::Database;
 
@@ -48,7 +47,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/packages/:id", get(handlers::packages::get_package))
         .route("/api/packages", post(handlers::packages::create_package))
         .route("/api/auth/register", post(handlers::auth::register))
+        .route("/api/auth/register-form", post(handlers::auth::register_form))
         .route("/api/auth/login", post(handlers::auth::login))
+        .route("/api/auth/login-form", post(handlers::auth::login_form))
         .route("/api/users/timeline", get(handlers::users::get_timeline))
         .route("/api/users/subscriptions", get(handlers::users::get_subscriptions))
         .route("/api/users/subscriptions", post(handlers::users::add_subscription))
@@ -65,6 +66,9 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn health_check() -> Json<serde_json::Value> {
-    Json(serde_json::json!({"status": "healthy"}))
+async fn health_check() -> Json<Value> {
+    Json(json!({
+        "status": "healthy",
+        "service": "fossdb-api"
+    }))
 }

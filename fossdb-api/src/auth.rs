@@ -33,13 +33,15 @@ pub fn create_jwt(user_id: &str, username: &str) -> Result<String> {
         exp: expiration,
     };
 
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key".to_string());
+    let config = crate::config::Config::from_env();
+    let secret = config.jwt_secret;
     let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_ref()))?;
     Ok(token)
 }
 
 pub fn verify_jwt(token: &str) -> Result<Claims> {
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key".to_string());
+    let config = crate::config::Config::from_env();
+    let secret = config.jwt_secret;
     let token_data = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_ref()),

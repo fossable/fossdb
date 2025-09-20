@@ -1,19 +1,19 @@
 use anyhow::Result;
-use chrono::Utc;
+use futures::future;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tokio::time::sleep;
 use tracing::{error, info, warn};
-use uuid::Uuid;
 
 mod scrapers;
 mod db;
 mod models;
+mod package_coordinator;
+mod config;
 
 use db::Database;
-use models::*;
 use models::Scraper;
+use package_coordinator::PackageCoordinator;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -25,78 +25,126 @@ async fn main() -> Result<()> {
     // Wait for CouchDB to be ready
     let db = loop {
         match Database::new().await {
-            Ok(db) => break db,
+            Ok(db) => break Arc::new(db),
             Err(e) => {
                 info!("Waiting for CouchDB to be ready: {}", e);
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             }
         }
     };
+    
+    // Initialize package coordinator
+    let coordinator = Arc::new(PackageCoordinator::new(db.clone()));
     let client = Client::new();
 
-    let scraper = scrapers::crates_io::CratesIoScraper::new(client.clone());
+    // Initialize scrapers
+    let crates_scraper = scrapers::crates_io::CratesIoScraper::new(client.clone());
+    
+    // Load configuration
+    let config = config::Config::from_env();
+    let libraries_io_api_key = config.libraries_io_api_key.clone();
+    
+    let libraries_scraper = if let Some(api_key) = libraries_io_api_key {
+        Some(scrapers::libraries_io::LibrariesIoScraper::new(client.clone(), api_key))
+    } else {
+        warn!("LIBRARIES_IO_API_KEY not set, libraries.io scraper will be skipped");
+        None
+    };
+
+    let scrapers: Vec<Arc<dyn Scraper + Send + Sync>> = {
+        let mut scrapers: Vec<Arc<dyn Scraper + Send + Sync>> = vec![
+            Arc::new(crates_scraper),
+        ];
+        
+        if let Some(libraries_scraper) = libraries_scraper {
+            scrapers.push(Arc::new(libraries_scraper));
+        }
+        
+        scrapers
+    };
 
     loop {
-        info!("Running scraper: {}", scraper.name());
+        info!("Starting parallel scraping cycle with {} scrapers", scrapers.len());
         
-        match scraper.scrape().await {
-            Ok(packages) => {
-                info!("Found {} packages from {}", packages.len(), scraper.name());
-                
-                for package in packages {
-                    if let Err(e) = save_package(&db, package).await {
-                        error!("Failed to save package: {}", e);
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Scraper {} failed: {}", scraper.name(), e);
+        // Run all scrapers in parallel using futures
+        let mut tasks = Vec::new();
+        
+        for scraper in &scrapers {
+            let scraper_name = scraper.name().to_string();
+            let coordinator = coordinator.clone();
+            let scraper = scraper.clone();
+            
+            // Create future for each scraper
+            let task = async move {
+                run_scraper(scraper.as_ref(), coordinator, scraper_name).await
+            };
+            tasks.push(task);
+        }
+        
+        // Wait for all scrapers to complete
+        let results = future::join_all(tasks).await;
+        
+        for (index, result) in results.into_iter().enumerate() {
+            if let Err(e) = result {
+                error!("Scraper {} failed: {}", scrapers[index].name(), e);
             }
         }
         
-        info!("Scraping cycle complete, sleeping for 1 hour...");
-        sleep(Duration::from_secs(3600)).await;
+        // Cleanup unused package locks
+        coordinator.cleanup_unused_locks();
+        
+        let sleep_duration = Duration::from_secs(config.scraper_interval_hours * 3600);
+        info!("All scrapers complete, sleeping for {} hours...", config.scraper_interval_hours);
+        sleep(sleep_duration).await;
     }
 }
 
-async fn save_package(db: &Database, package_data: ScrapedPackage) -> Result<()> {
-    let package = Package {
-        id: Uuid::new_v4().to_string(),
-        rev: None,
-        name: package_data.name,
-        description: package_data.description,
-        homepage: package_data.homepage,
-        repository: package_data.repository,
-        license: package_data.license,
-        maintainers: package_data.maintainers,
-        tags: package_data.tags,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-        submitted_by: Some("scraper".to_string()),
-    };
-
-    let mut package_value = serde_json::to_value(&package)?;
-    db.packages().save(&mut package_value).await?;
+/// Run a single scraper and save packages using the coordinator
+async fn run_scraper(
+    scraper: &dyn Scraper,
+    coordinator: Arc<PackageCoordinator>,
+    scraper_name: String,
+) -> Result<()> {
+    info!("Starting scraper: {}", scraper_name);
     
-    // Save versions
-    for version_data in package_data.versions {
-        let version = PackageVersion {
-            id: Uuid::new_v4().to_string(),
-            rev: None,
-            package_id: package.id.clone(),
-            version: version_data.version,
-            release_date: version_data.release_date,
-            download_url: version_data.download_url,
-            checksum: version_data.checksum,
-            dependencies: version_data.dependencies,
-            vulnerabilities: Vec::new(),
-            changelog: version_data.changelog,
-            created_at: Utc::now(),
-        };
-        
-        let mut version_value = serde_json::to_value(&version)?;
-        db.versions().save(&mut version_value).await?;
+    match scraper.scrape().await {
+        Ok(packages) => {
+            info!("Found {} packages from {}", packages.len(), scraper_name);
+            
+            // Process packages concurrently but with locking
+            let save_handles: Vec<_> = packages
+                .into_iter()
+                .map(|package| {
+                    let coordinator = coordinator.clone();
+                    let scraper_name = scraper_name.clone();
+                    
+                    tokio::spawn(async move {
+                        match coordinator.save_package(package.clone()).await {
+                            Ok(()) => {
+                                tracing::debug!("Successfully saved package {} from {}", package.name, scraper_name);
+                            }
+                            Err(e) => {
+                                error!("Failed to save package {} from {}: {}", package.name, scraper_name, e);
+                            }
+                        }
+                    })
+                })
+                .collect();
+            
+            // Wait for all package saves to complete
+            for handle in save_handles {
+                if let Err(e) = handle.await {
+                    error!("Package save task failed: {}", e);
+                }
+            }
+            
+            info!("Completed processing packages from {}", scraper_name);
+        }
+        Err(e) => {
+            error!("Scraper {} failed during scraping: {}", scraper_name, e);
+            return Err(e);
+        }
     }
-
+    
     Ok(())
 }

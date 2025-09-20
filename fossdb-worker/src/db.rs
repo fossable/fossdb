@@ -14,9 +14,10 @@ pub struct Database {
 
 impl Database {
     pub async fn new() -> Result<Self> {
-        let couchdb_url = std::env::var("COUCHDB_URL").unwrap_or_else(|_| "http://localhost:5984".to_string());
-        let couchdb_username = std::env::var("COUCHDB_USERNAME").unwrap_or_else(|_| "admin".to_string());
-        let couchdb_password = std::env::var("COUCHDB_PASSWORD").unwrap_or_else(|_| "password".to_string());
+        let config = crate::config::Config::from_env();
+        let couchdb_url = config.couchdb_url;
+        let couchdb_username = config.couchdb_username;
+        let couchdb_password = config.couchdb_password;
         
         let client = Client::new(&couchdb_url, &couchdb_username, &couchdb_password)?;
         
@@ -73,6 +74,11 @@ pub struct Package {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub submitted_by: Option<String>,
+    pub platform: Option<String>,
+    pub language: Option<String>,
+    pub status: Option<String>,
+    pub dependents_count: Option<u32>,
+    pub rank: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +101,7 @@ pub struct PackageVersion {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dependency {
     pub name: String,
-    pub version_constraint: String,
+    pub version_requirement: String,
+    pub dependency_type: String,
     pub optional: bool,
 }

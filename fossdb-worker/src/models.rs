@@ -16,6 +16,11 @@ pub struct ScrapedPackage {
     pub maintainers: Vec<String>,
     pub tags: Vec<String>,
     pub versions: Vec<ScrapedVersion>,
+    pub platform: Option<String>,
+    pub language: Option<String>,
+    pub status: Option<String>,
+    pub dependents_count: Option<u32>,
+    pub rank: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +34,7 @@ pub struct ScrapedVersion {
 }
 
 #[async_trait::async_trait]
-pub trait Scraper {
+pub trait Scraper: Send + Sync {
     fn name(&self) -> &str;
     async fn scrape(&self) -> anyhow::Result<Vec<ScrapedPackage>>;
 }
