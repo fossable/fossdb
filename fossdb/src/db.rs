@@ -1,5 +1,4 @@
 use native_db::*;
-use native_model::{native_model, Model};
 use anyhow::Result;
 use std::sync::Arc;
 use once_cell::sync::Lazy;
@@ -67,7 +66,7 @@ impl Database {
     pub fn get_package_by_name(&self, name: &str) -> Result<Option<Package>> {
         let r = self.db.r_transaction()?;
         let results: Vec<Package> = r.scan().secondary(PackageKey::name)?
-            .start_with(name)
+            .start_with(name)?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(results.into_iter().next())
@@ -75,7 +74,7 @@ impl Database {
 
     pub fn get_all_packages(&self) -> Result<Vec<Package>> {
         let r = self.db.r_transaction()?;
-        let all: Vec<Package> = r.scan().primary()?.all().collect::<Result<Vec<_>, _>>()?;
+        let all: Vec<Package> = r.scan().primary()?.all()?.collect::<Result<Vec<_>, _>>()?;
         Ok(all)
     }
 
@@ -109,14 +108,14 @@ impl Database {
     pub fn get_versions_by_package(&self, package_id: u64) -> Result<Vec<PackageVersion>> {
         let r = self.db.r_transaction()?;
         let versions: Vec<PackageVersion> = r.scan().secondary(PackageVersionKey::package_id)?
-            .start_with(package_id)
+            .start_with(package_id)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(versions)
     }
 
     pub fn get_all_versions(&self) -> Result<Vec<PackageVersion>> {
         let r = self.db.r_transaction()?;
-        let all: Vec<PackageVersion> = r.scan().primary()?.all().collect::<Result<Vec<_>, _>>()?;
+        let all: Vec<PackageVersion> = r.scan().primary()?.all()?.collect::<Result<Vec<_>, _>>()?;
         Ok(all)
     }
 
@@ -139,7 +138,7 @@ impl Database {
     pub fn get_user_by_email(&self, email: &str) -> Result<Option<User>> {
         let r = self.db.r_transaction()?;
         let results: Vec<User> = r.scan().secondary(UserKey::email)?
-            .start_with(email)
+            .start_with(email)?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(results.into_iter().next())
@@ -148,7 +147,7 @@ impl Database {
     pub fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
         let r = self.db.r_transaction()?;
         let results: Vec<User> = r.scan().secondary(UserKey::username)?
-            .start_with(username)
+            .start_with(username)?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(results.into_iter().next())
@@ -156,7 +155,7 @@ impl Database {
 
     pub fn get_all_users(&self) -> Result<Vec<User>> {
         let r = self.db.r_transaction()?;
-        let all: Vec<User> = r.scan().primary()?.all().collect::<Result<Vec<_>, _>>()?;
+        let all: Vec<User> = r.scan().primary()?.all()?.collect::<Result<Vec<_>, _>>()?;
         Ok(all)
     }
 
@@ -178,7 +177,7 @@ impl Database {
 
     pub fn get_all_vulnerabilities(&self) -> Result<Vec<Vulnerability>> {
         let r = self.db.r_transaction()?;
-        let all: Vec<Vulnerability> = r.scan().primary()?.all().collect::<Result<Vec<_>, _>>()?;
+        let all: Vec<Vulnerability> = r.scan().primary()?.all()?.collect::<Result<Vec<_>, _>>()?;
         Ok(all)
     }
 
@@ -200,14 +199,14 @@ impl Database {
 
     pub fn get_all_timeline_events(&self) -> Result<Vec<TimelineEvent>> {
         let r = self.db.r_transaction()?;
-        let all: Vec<TimelineEvent> = r.scan().primary()?.all().collect::<Result<Vec<_>, _>>()?;
+        let all: Vec<TimelineEvent> = r.scan().primary()?.all()?.collect::<Result<Vec<_>, _>>()?;
         Ok(all)
     }
 
     pub fn get_timeline_by_package(&self, package_id: u64) -> Result<Vec<TimelineEvent>> {
         let r = self.db.r_transaction()?;
         let events: Vec<TimelineEvent> = r.scan().secondary(TimelineEventKey::package_id)?
-            .start_with(package_id)
+            .start_with(package_id)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(events)
     }

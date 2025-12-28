@@ -3,12 +3,13 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
-use std::time::Duration;
+use std::sync::Arc;
 
 use crate::scraper_models::{Scraper, ScrapedPackage, ScrapedVersion, Dependency};
+use crate::client::{AdaptiveRateLimitedClient, AdaptiveConfig};
 
 pub struct LibrariesIoScraper {
-    client: Client,
+    client: AdaptiveRateLimitedClient,
     api_key: String,
 }
 
@@ -60,23 +61,24 @@ struct LibrariesIoPlatform {
 
 impl LibrariesIoScraper {
     pub fn new(client: Client, api_key: String) -> Self {
-        Self { client, api_key }
+        // libraries.io has a 60 req/min rate limit for authenticated requests
+        // Start conservative and let it adapt
+        let config = AdaptiveConfig {
+            initial_rate: 30,  // 30 req/min
+            min_rate: 6,       // 6 req/min minimum
+            max_rate: 60,      // 60 req/min maximum
+        };
+        let adaptive_client = AdaptiveRateLimitedClient::new(client, config);
+        Self {
+            client: adaptive_client,
+            api_key,
+        }
     }
 
     async fn get_platforms(&self) -> Result<Vec<LibrariesIoPlatform>> {
         let url = format!("https://libraries.io/api/platforms?api_key={}", self.api_key);
-        
-        let response = self.client
-            .get(&url)
-            .send()
-            .await?;
 
-        if response.status().as_u16() == 429 {
-            // Rate limited, wait a bit
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            return Err(anyhow::anyhow!("Rate limited by libraries.io API"));
-        }
-
+        let response = self.client.get(&url).await?;
         let platforms: Vec<LibrariesIoPlatform> = response.json().await?;
         Ok(platforms)
     }
@@ -84,23 +86,11 @@ impl LibrariesIoScraper {
     async fn get_project_dependencies(&self, platform: &str, name: &str, version: Option<&str>) -> Result<Vec<Dependency>> {
         let version_param = version.unwrap_or("latest");
         let url = format!(
-            "https://libraries.io/api/{}/{}/{}/dependencies?api_key={}", 
+            "https://libraries.io/api/{}/{}/{}/dependencies?api_key={}",
             platform, name, version_param, self.api_key
         );
-        
-        // Add delay to respect rate limiting
-        tokio::time::sleep(Duration::from_millis(1000)).await;
 
-        let response = self.client
-            .get(&url)
-            .send()
-            .await?;
-
-        if response.status().as_u16() == 429 {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            return Ok(Vec::new()); // Return empty on rate limit
-        }
-
+        let response = self.client.get(&url).await?;
         let dependencies: Vec<LibrariesIoDependency> = response.json().await.unwrap_or_default();
         
         let deps = dependencies
@@ -118,24 +108,13 @@ impl LibrariesIoScraper {
 
     async fn get_project_details(&self, platform: &str, name: &str) -> Result<Option<LibrariesIoProject>> {
         let url = format!(
-            "https://libraries.io/api/{}/{}?api_key={}", 
+            "https://libraries.io/api/{}/{}?api_key={}",
             platform, name, self.api_key
         );
-        
-        // Add delay to respect rate limiting
-        tokio::time::sleep(Duration::from_millis(1000)).await;
 
-        let response = self.client
-            .get(&url)
-            .send()
-            .await?;
+        let response = self.client.get(&url).await?;
 
         if response.status().as_u16() == 404 {
-            return Ok(None);
-        }
-
-        if response.status().as_u16() == 429 {
-            tokio::time::sleep(Duration::from_secs(60)).await;
             return Ok(None);
         }
 
@@ -148,23 +127,11 @@ impl LibrariesIoScraper {
         
         // Search for popular packages on this platform
         let search_url = format!(
-            "https://libraries.io/api/search?platforms={}&sort=rank&per_page=50&api_key={}", 
+            "https://libraries.io/api/search?platforms={}&sort=rank&per_page=50&api_key={}",
             platform.name.to_lowercase(), self.api_key
         );
 
-        // Add delay to respect rate limiting
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-
-        let response = self.client
-            .get(&search_url)
-            .send()
-            .await?;
-
-        if response.status().as_u16() == 429 {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            return Ok(packages);
-        }
-
+        let response = self.client.get(&search_url).await?;
         let search_results: Vec<LibrariesIoProject> = response.json().await.unwrap_or_default();
 
         for project in search_results.into_iter().take(20) { // Limit to 20 packages per platform
@@ -230,35 +197,118 @@ impl Scraper for LibrariesIoScraper {
         "libraries.io"
     }
 
-    async fn scrape(&self) -> Result<Vec<ScrapedPackage>> {
-        let mut all_packages = Vec::new();
+    async fn scrape(&self, db: Arc<crate::db::Database>) -> Result<()> {
+        use crate::models::{Package, PackageVersion};
 
         // Get list of supported platforms
         let platforms = self.get_platforms().await?;
-        
+
         // Focus on the most popular platforms to avoid overwhelming the API
         let priority_platforms = ["NPM", "Maven", "PyPI", "Packagist", "Go", "NuGet", "RubyGems"];
-        
+
         for platform in platforms {
             if priority_platforms.contains(&platform.name.as_str()) {
                 tracing::info!("Scraping libraries.io platform: {}", platform.name);
-                
+
                 match self.scrape_platform(&platform).await {
-                    Ok(mut packages) => {
+                    Ok(packages) => {
                         tracing::info!("Found {} packages from platform {}", packages.len(), platform.name);
-                        all_packages.append(&mut packages);
+
+                        // Save each package to the database
+                        for package_data in packages {
+                            // Check if package already exists
+                            match db.get_package_by_name(&package_data.name) {
+                                Ok(Some(_)) => {
+                                    tracing::debug!(
+                                        "Package {} already exists, skipping",
+                                        package_data.name
+                                    );
+                                    continue;
+                                }
+                                Ok(None) => {
+                                    // Package doesn't exist, save it
+                                    let now = Utc::now();
+
+                                    let package = Package {
+                                        id: 0, // Will be auto-generated
+                                        name: package_data.name.clone(),
+                                        description: package_data.description,
+                                        homepage: package_data.homepage,
+                                        repository: package_data.repository,
+                                        license: package_data.license,
+                                        maintainers: package_data.maintainers,
+                                        tags: package_data.tags,
+                                        created_at: now,
+                                        updated_at: now,
+                                        submitted_by: Some("scraper".to_string()),
+                                        platform: package_data.platform,
+                                        language: package_data.language,
+                                        status: package_data.status,
+                                        dependents_count: package_data.dependents_count,
+                                        rank: package_data.rank,
+                                    };
+
+                                    match db.insert_package(package) {
+                                        Ok(saved_package) => {
+                                            tracing::info!("Saved package: {}", saved_package.name);
+
+                                            // Save versions
+                                            for version_data in package_data.versions {
+                                                let version = PackageVersion {
+                                                    id: 0, // Will be auto-generated
+                                                    package_id: saved_package.id,
+                                                    version: version_data.version.clone(),
+                                                    release_date: version_data.release_date,
+                                                    download_url: version_data.download_url,
+                                                    checksum: version_data.checksum,
+                                                    dependencies: version_data.dependencies,
+                                                    vulnerabilities: Vec::new(),
+                                                    changelog: version_data.changelog,
+                                                    created_at: now,
+                                                };
+
+                                                if let Err(e) = db.insert_version(version) {
+                                                    tracing::error!(
+                                                        "Failed to save version {} for package {}: {}",
+                                                        version_data.version,
+                                                        saved_package.name,
+                                                        e
+                                                    );
+                                                } else {
+                                                    tracing::debug!(
+                                                        "Saved version {} for package {}",
+                                                        version_data.version,
+                                                        saved_package.name
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "Failed to save package {} from libraries.io: {}",
+                                                package_data.name,
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Failed to check if package {} exists: {}",
+                                        package_data.name,
+                                        e
+                                    );
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         tracing::warn!("Failed to scrape platform {}: {}", platform.name, e);
                     }
                 }
-
-                // Add delay between platforms to respect rate limits
-                tokio::time::sleep(Duration::from_secs(5)).await;
             }
         }
 
-        tracing::info!("Total packages scraped from libraries.io: {}", all_packages.len());
-        Ok(all_packages)
+        Ok(())
     }
 }

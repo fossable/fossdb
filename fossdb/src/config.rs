@@ -12,8 +12,7 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Self {
         Self {
-            database_path: env::var("DATABASE_PATH")
-                .unwrap_or_else(|_| "./data/fossdb.db".to_string()),
+            database_path: env::var("DATABASE_PATH").unwrap_or_else(|_| "./foss.db".to_string()),
             jwt_secret: env::var("JWT_SECRET")
                 .unwrap_or_else(|_| "your-secret-key-change-this".to_string()),
             server_port: env::var("SERVER_PORT")

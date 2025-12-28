@@ -3,8 +3,7 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use serde::Serialize;
 use crate::AppState;
 
 #[derive(Serialize)]

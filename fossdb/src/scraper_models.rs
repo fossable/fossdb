@@ -34,5 +34,5 @@ pub struct ScrapedVersion {
 #[async_trait::async_trait]
 pub trait Scraper: Send + Sync {
     fn name(&self) -> &str;
-    async fn scrape(&self) -> anyhow::Result<Vec<ScrapedPackage>>;
+    async fn scrape(&self, db: std::sync::Arc<crate::db::Database>) -> anyhow::Result<()>;
 }

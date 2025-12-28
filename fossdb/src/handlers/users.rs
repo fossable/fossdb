@@ -5,7 +5,7 @@ use axum::{
 };
 use serde_json::Value;
 
-use crate::{models::*, AppState};
+use crate::AppState;
 
 pub async fn get_timeline(
     State(state): State<AppState>,
