@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 
-// Re-export types from backend for consistency
-pub use crate::db::Package;
-pub use crate::db::PackageVersion;
-pub use crate::db::Dependency;
+// Re-export types from models for consistency
+pub use crate::models::Dependency;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScrapedPackage {

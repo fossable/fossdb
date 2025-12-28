@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
-use crate::models::{Scraper, ScrapedPackage, ScrapedVersion};
+use crate::scraper_models::{Scraper, ScrapedPackage, ScrapedVersion};
 
 pub struct CratesIoScraper {
     client: Client,

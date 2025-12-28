@@ -6,7 +6,6 @@ use axum::{
 };
 use chrono::Utc;
 use serde::Deserialize;
-use uuid::Uuid;
 
 use crate::{auth::*, models::*, AppState};
 
@@ -43,14 +42,11 @@ async fn register_user(
     email: String,
     password: String,
 ) -> Result<Json<AuthResponse>, StatusCode> {
-    let users_db = state.db.users();
-    
     let password_hash = hash_password(&password)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let user = User {
-        id: Uuid::new_v4().to_string(),
-        rev: None,
+        id: 0,  // Will be auto-generated
         username: username.clone(),
         email,
         password_hash,
@@ -59,17 +55,15 @@ async fn register_user(
         is_verified: false,
     };
 
-    let mut user_value = serde_json::to_value(&user)
+    let user = state.db.insert_user(user)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    users_db.save(&mut user_value).await
+
+    let token = create_jwt(&user.id.to_string(), &user.username)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
-    let token = create_jwt(&user.id, &user.username)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
+
     Ok(Json(AuthResponse {
         token,
-        user_id: user.id,
+        user_id: user.id.to_string(),
     }))
 }
 
@@ -92,22 +86,9 @@ async fn login_user(
     email: String,
     password: String,
 ) -> Result<Json<AuthResponse>, StatusCode> {
-    let users_db = state.db.users();
-    
-    // Find user by email - in a real implementation, you'd want an index
-    let all_users = users_db.get_all().await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
-    let user = all_users
-        .get_data()
-        .iter()
-        .find_map(|doc: &serde_json::Value| {
-            let user: Result<User, _> = serde_json::from_value(doc.clone());
-            match user {
-                Ok(u) if u.email == email => Some(u),
-                _ => None,
-            }
-        })
+    // Use indexed email lookup
+    let user = state.db.get_user_by_email(&email)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let is_valid = verify_password(&password, &user.password_hash)
@@ -117,11 +98,11 @@ async fn login_user(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let token = create_jwt(&user.id, &user.username)
+    let token = create_jwt(&user.id.to_string(), &user.username)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(AuthResponse {
         token,
-        user_id: user.id,
+        user_id: user.id.to_string(),
     }))
 }

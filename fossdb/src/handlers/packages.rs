@@ -4,9 +4,8 @@ use axum::{
     response::Json,
 };
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
-use uuid::Uuid;
 
 use crate::{models::*, AppState};
 
@@ -22,16 +21,8 @@ pub async fn list_packages(
     Query(params): Query<ListPackagesQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, StatusCode> {
-    let packages_db = state.db.packages();
-    
-    match packages_db.get_all().await {
+    match state.db.get_all_packages() {
         Ok(packages) => {
-            let packages: Vec<Package> = packages
-                .get_data()
-                .iter()
-                .filter_map(|doc: &Value| serde_json::from_value(doc.clone()).ok())
-                .collect();
-            
             Ok(Json(serde_json::json!({
                 "packages": packages,
                 "total": packages.len()
@@ -45,15 +36,13 @@ pub async fn get_package(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Package>, StatusCode> {
-    let packages_db = state.db.packages();
-    
-    match packages_db.get(&id).await {
-        Ok(doc) => {
-            let package: Package = serde_json::from_value(doc)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            Ok(Json(package))
-        }
-        Err(_) => Err(StatusCode::NOT_FOUND),
+    let id = id.parse::<u64>()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    match state.db.get_package(id) {
+        Ok(Some(package)) => Ok(Json(package)),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
 
@@ -61,11 +50,10 @@ pub async fn create_package(
     State(state): State<AppState>,
     Json(payload): Json<CreatePackageRequest>,
 ) -> Result<Json<Package>, StatusCode> {
-    let packages_db = state.db.packages();
-    
+    let now = Utc::now();
+
     let package = Package {
-        id: Uuid::new_v4().to_string(),
-        rev: None,
+        id: 0,  // Will be auto-generated
         name: payload.name,
         description: payload.description,
         homepage: payload.homepage,
@@ -73,8 +61,8 @@ pub async fn create_package(
         license: payload.license,
         maintainers: payload.maintainers,
         tags: payload.tags,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        created_at: now,
+        updated_at: now,
         submitted_by: None,
         platform: None,
         language: None,
@@ -83,10 +71,8 @@ pub async fn create_package(
         rank: None,
     };
 
-    let mut package_value = serde_json::to_value(&package)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    match packages_db.save(&mut package_value).await {
-        Ok(_) => Ok(Json(package)),
+    match state.db.insert_package(package) {
+        Ok(package) => Ok(Json(package)),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }

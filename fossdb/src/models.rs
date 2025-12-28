@@ -1,12 +1,15 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use native_db::*;
+use native_model::{native_model, Model};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[native_model(id = 1, version = 1)]
+#[native_db]
 pub struct Package {
-    #[serde(rename = "_id")]
-    pub id: String,
-    #[serde(rename = "_rev", skip_serializing_if = "Option::is_none")]
-    pub rev: Option<String>,
+    #[primary_key]
+    pub id: u64,
+    #[secondary_key(unique)]
     pub name: String,
     pub description: Option<String>,
     pub homepage: Option<String>,
@@ -25,12 +28,13 @@ pub struct Package {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[native_model(id = 2, version = 1)]
+#[native_db]
 pub struct PackageVersion {
-    #[serde(rename = "_id")]
-    pub id: String,
-    #[serde(rename = "_rev", skip_serializing_if = "Option::is_none")]
-    pub rev: Option<String>,
-    pub package_id: String,
+    #[primary_key]
+    pub id: u64,
+    #[secondary_key]
+    pub package_id: u64,
     pub version: String,
     pub release_date: DateTime<Utc>,
     pub download_url: Option<String>,
@@ -50,11 +54,27 @@ pub struct Dependency {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[native_model(id = 3, version = 1)]
+#[native_db]
+pub struct User {
+    #[primary_key]
+    pub id: u64,
+    #[secondary_key(unique)]
+    pub email: String,
+    #[secondary_key(unique)]
+    pub username: String,
+    pub password_hash: String,
+    pub subscriptions: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub is_verified: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[native_model(id = 4, version = 1)]
+#[native_db]
 pub struct Vulnerability {
-    #[serde(rename = "_id")]
-    pub id: String,
-    #[serde(rename = "_rev", skip_serializing_if = "Option::is_none")]
-    pub rev: Option<String>,
+    #[primary_key]
+    pub id: u64,
     pub cve_id: Option<String>,
     pub title: String,
     pub description: String,
@@ -64,7 +84,7 @@ pub struct Vulnerability {
     pub fixed_in: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum VulnerabilitySeverity {
     Low,
     Medium,
@@ -74,39 +94,26 @@ pub enum VulnerabilitySeverity {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AffectedPackage {
-    pub package_id: String,
+    pub package_id: u64,
     pub version_range: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct User {
-    #[serde(rename = "_id")]
-    pub id: String,
-    #[serde(rename = "_rev", skip_serializing_if = "Option::is_none")]
-    pub rev: Option<String>,
-    pub username: String,
-    pub email: String,
-    pub password_hash: String,
-    pub subscriptions: Vec<String>,
-    pub created_at: DateTime<Utc>,
-    pub is_verified: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[native_model(id = 5, version = 1)]
+#[native_db]
 pub struct TimelineEvent {
-    #[serde(rename = "_id")]
-    pub id: String,
-    #[serde(rename = "_rev", skip_serializing_if = "Option::is_none")]
-    pub rev: Option<String>,
+    #[primary_key]
+    pub id: u64,
+    #[secondary_key]
+    pub package_id: u64,
     pub event_type: EventType,
-    pub package_id: String,
     pub package_name: String,
     pub version: Option<String>,
     pub description: String,
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum EventType {
     NewRelease,
     SecurityAlert,

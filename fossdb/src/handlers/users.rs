@@ -10,16 +10,8 @@ use crate::{models::*, AppState};
 pub async fn get_timeline(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, StatusCode> {
-    let timeline_db = state.db.timeline();
-    
-    match timeline_db.get_all().await {
+    match state.db.get_all_timeline_events() {
         Ok(events) => {
-            let events: Vec<TimelineEvent> = events
-                .get_data()
-                .iter()
-                .filter_map(|doc: &Value| serde_json::from_value(doc.clone()).ok())
-                .collect();
-            
             Ok(Json(serde_json::json!({
                 "events": events
             })))

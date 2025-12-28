@@ -1,16 +1,19 @@
 [package]
-name = "fossdb-worker"
+name = "fossdb"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+axum = "0.7"
 tokio = { version = "1.0", features = ["full"] }
-reqwest = { version = "0.11", features = ["json"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "fs"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.0", features = ["v4"] }
-couch_rs = "0.10"
+bcrypt = "0.15"
+jsonwebtoken = "9.0"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
@@ -19,5 +22,7 @@ regex = "1.0"
 semver = "1.0"
 async-trait = "0.1"
 tokio-util = "0.7"
-dashmap = "5.5"
 futures = "0.3"
+native_db = "0.7"
+native_model = "0.4"
+once_cell = "1.19"

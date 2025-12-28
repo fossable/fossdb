@@ -5,7 +5,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
 
-use crate::models::{Scraper, ScrapedPackage, ScrapedVersion, Dependency};
+use crate::scraper_models::{Scraper, ScrapedPackage, ScrapedVersion, Dependency};
 
 pub struct LibrariesIoScraper {
     client: Client,
