@@ -15,6 +15,7 @@ mod config;
 mod db;
 mod handlers;
 mod id_generator;
+mod middleware;
 mod models;
 mod scraper_models;
 mod scrapers;
@@ -92,11 +93,21 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Scrapers disabled via --no-scrapers flag");
     }
 
+    // Protected routes that require authentication
+    let protected = Router::new()
+        .route("/api/packages", post(handlers::packages::create_package))
+        .route(
+            "/api/users/subscriptions",
+            post(handlers::users::add_subscription),
+        )
+        .layer(axum::middleware::from_fn(middleware::auth_middleware))
+        .with_state(state.clone());
+
     let app = Router::new()
         .route("/api/health", get(health_check))
+        .route("/api/stats", get(handlers::analytics::get_db_stats))
         .route("/api/packages", get(handlers::packages::list_packages))
         .route("/api/packages/{id}", get(handlers::packages::get_package))
-        .route("/api/packages", post(handlers::packages::create_package))
         .route("/api/auth/register", post(handlers::auth::register))
         .route(
             "/api/auth/register-form",
@@ -109,10 +120,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/users/subscriptions",
             get(handlers::users::get_subscriptions),
         )
-        .route(
-            "/api/users/subscriptions",
-            post(handlers::users::add_subscription),
-        )
         .route("/api/analytics", get(handlers::analytics::get_analytics))
         .route(
             "/api/analytics/languages",
@@ -122,6 +129,7 @@ async fn main() -> anyhow::Result<()> {
             "/api/analytics/security",
             get(handlers::analytics::get_security_report),
         )
+        .merge(protected)
         .layer(CorsLayer::permissive())
         .with_state(state);
 

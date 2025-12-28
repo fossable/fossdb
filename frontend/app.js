@@ -7,9 +7,12 @@ let comparisonList = [];
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM loaded, initializing app...');
-    console.log('showHome function available:', typeof window.showHome);
-    console.log('showPackages function available:', typeof window.showPackages);
+    // Hide loading screen
+    const loadingScreen = document.getElementById('loading-screen');
+    if (loadingScreen) {
+        loadingScreen.style.display = 'none';
+    }
+
     checkAuthStatus();
     showHome();
     
@@ -69,53 +72,45 @@ function updateActiveNav(activePageId) {
 
 // Navigation functions - make them globally available
 window.showHome = function() {
-    console.log('showHome called');
     hideAllPages();
-    document.getElementById('home-page').classList.remove('hidden');
+    const homePage = document.getElementById('home-page');
+    if (homePage) {
+        homePage.classList.remove('hidden');
+    }
     updateActiveNav('home');
-    
-    // Trigger scroll to top animation
     window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
 window.showPackages = function() {
-    console.log('showPackages called');
     hideAllPages();
-    document.getElementById('packages-page').classList.remove('hidden');
+    const packagesPage = document.getElementById('packages-page');
+    if (packagesPage) {
+        packagesPage.classList.remove('hidden');
+    }
     updateActiveNav('packages');
-    
-    // Trigger scroll to top animation
     window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
-window.showAnalytics = function() {
-    console.log('showAnalytics called');
-    hideAllPages();
-    document.getElementById('analytics-page').classList.remove('hidden');
-    updateActiveNav('analytics');
-    
-    // Trigger scroll to top animation
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    
-    // Initialize analytics data
-    loadAnalyticsData();
-};
+// Analytics page removed - use /api/analytics endpoint for data
 
 window.showAPI = function() {
-    console.log('showAPI called');
     hideAllPages();
-    document.getElementById('api-page').classList.remove('hidden');
+    const apiPage = document.getElementById('api-page');
+    if (apiPage) {
+        apiPage.classList.remove('hidden');
+    }
     updateActiveNav('api');
-    
-    // Trigger scroll to top animation
     window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
 function hideAllPages() {
-    document.getElementById('home-page').classList.add('hidden');
-    document.getElementById('packages-page').classList.add('hidden');
-    document.getElementById('analytics-page').classList.add('hidden');
-    document.getElementById('api-page').classList.add('hidden');
+    const homePage = document.getElementById('home-page');
+    const packagesPage = document.getElementById('packages-page');
+    const apiPage = document.getElementById('api-page');
+
+    if (homePage) homePage.classList.add('hidden');
+    if (packagesPage) packagesPage.classList.add('hidden');
+    if (apiPage) apiPage.classList.add('hidden');
 }
 
 // Modal functions with enhanced animations - make them globally available
@@ -462,7 +457,25 @@ function setupHTMXHandlers() {
         if (target) {
             target.classList.remove('opacity-75');
         }
-        
+
+        // Handle 401 Unauthorized - token expired or invalid
+        if (evt.detail.xhr.status === 401) {
+            // Clear auth state
+            authToken = null;
+            currentUser = null;
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_data');
+            updateAuthUI();
+
+            showNotification('Session expired. Please log in again.', 'warning');
+
+            // Only show login modal if this wasn't already an auth request
+            if (!evt.detail.xhr.responseURL.includes('/api/auth/')) {
+                setTimeout(() => showLogin(), 500);
+            }
+            return;
+        }
+
         // Handle packages list response
         if (evt.detail.xhr.responseURL && evt.detail.xhr.responseURL.includes('/api/packages')) {
             try {
@@ -471,7 +484,6 @@ function setupHTMXHandlers() {
                     renderPackages(data.packages, evt.detail.target);
                 }
             } catch (error) {
-                console.error('Error parsing packages response:', error);
                 evt.detail.target.innerHTML = `
                     <div class="text-center py-12">
                         <div class="text-red-500 mb-4">
@@ -486,6 +498,20 @@ function setupHTMXHandlers() {
             }
         }
         
+        // Handle stats response
+        if (evt.detail.xhr.responseURL && evt.detail.xhr.responseURL.includes('/api/stats')) {
+            if (evt.detail.xhr.status === 200) {
+                try {
+                    const stats = JSON.parse(evt.detail.xhr.responseText);
+                    evt.detail.target.innerHTML = renderDatabaseStats(stats);
+                } catch (error) {
+                    evt.detail.target.innerHTML = `
+                        <div class="col-span-full text-gray-400 text-sm">Failed to load stats</div>
+                    `;
+                }
+            }
+        }
+
         // Handle auth responses
         if (evt.detail.xhr.responseURL && evt.detail.xhr.responseURL.includes('/api/auth/')) {
             const isLogin = evt.detail.xhr.responseURL.includes('/login');
@@ -558,9 +584,29 @@ function setupHTMXHandlers() {
     
     // Handle HTMX errors
     document.body.addEventListener('htmx:responseError', function(evt) {
-        console.error('HTMX Error:', evt.detail);
         showNotification('Network error. Please try again.', 'error');
     });
+}
+
+function renderDatabaseStats(stats) {
+    return `
+        <div class="bg-gray-800/50 rounded-lg p-3 border border-gray-700">
+            <div class="text-2xl font-bold text-blue-400 mb-1">${stats.total_packages}</div>
+            <div class="text-xs text-gray-400">Packages</div>
+        </div>
+        <div class="bg-gray-800/50 rounded-lg p-3 border border-gray-700">
+            <div class="text-2xl font-bold text-green-400 mb-1">${stats.total_versions}</div>
+            <div class="text-xs text-gray-400">Versions</div>
+        </div>
+        <div class="bg-gray-800/50 rounded-lg p-3 border border-gray-700">
+            <div class="text-2xl font-bold text-purple-400 mb-1">${stats.total_users}</div>
+            <div class="text-xs text-gray-400">Users</div>
+        </div>
+        <div class="bg-gray-800/50 rounded-lg p-3 border border-gray-700">
+            <div class="text-2xl font-bold text-yellow-400 mb-1">${stats.total_vulnerabilities}</div>
+            <div class="text-xs text-gray-400">CVEs</div>
+        </div>
+    `;
 }
 
 function renderPackages(packages, target) {
@@ -578,10 +624,10 @@ function renderPackages(packages, target) {
         `;
         return;
     }
-    
+
     // Update results count
     updateResultsCount(packages.length);
-    
+
     if (currentViewMode === 'list') {
         renderPackagesList(packages, target);
     } else {
@@ -749,10 +795,6 @@ document.addEventListener('keydown', function(evt) {
                 showPackages();
                 break;
             case '3':
-                evt.preventDefault();
-                showAnalytics();
-                break;
-            case '4':
                 evt.preventDefault();
                 showAPI();
                 break;
@@ -960,67 +1002,182 @@ function clearComparison() {
     updateComparisonUI();
 }
 
-function showComparison() {
-    // This would open a comparison modal/page
-    showNotification('Comparison feature coming soon!', 'info');
+async function showComparison() {
+    if (comparisonList.length < 2) {
+        showNotification('Add at least 2 packages to compare', 'warning');
+        return;
+    }
+
+    try {
+        const packages = await Promise.all(
+            comparisonList.map(id =>
+                fetch(`/api/packages/${id}`).then(r => r.json())
+            )
+        );
+
+        const modalContent = document.getElementById('modal-content');
+        modalContent.innerHTML = `
+            <h2 class="text-2xl font-bold text-gray-800 mb-6">Package Comparison</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-gray-300">
+                            <th class="py-3 px-4 font-semibold text-gray-700 bg-gray-50">Property</th>
+                            ${packages.map(pkg => `
+                                <th class="py-3 px-4 font-semibold text-gray-700 bg-gray-50">${pkg.name}</th>
+                            `).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="border-b border-gray-200">
+                            <td class="py-3 px-4 text-gray-600 font-medium">Description</td>
+                            ${packages.map(pkg => `
+                                <td class="py-3 px-4 text-gray-700">${pkg.description || 'N/A'}</td>
+                            `).join('')}
+                        </tr>
+                        <tr class="border-b border-gray-200 bg-gray-50">
+                            <td class="py-3 px-4 text-gray-600 font-medium">License</td>
+                            ${packages.map(pkg => `
+                                <td class="py-3 px-4 text-gray-700">${pkg.license || 'N/A'}</td>
+                            `).join('')}
+                        </tr>
+                        <tr class="border-b border-gray-200">
+                            <td class="py-3 px-4 text-gray-600 font-medium">Language</td>
+                            ${packages.map(pkg => `
+                                <td class="py-3 px-4 text-gray-700">${pkg.language || 'N/A'}</td>
+                            `).join('')}
+                        </tr>
+                        <tr class="border-b border-gray-200 bg-gray-50">
+                            <td class="py-3 px-4 text-gray-600 font-medium">Platform</td>
+                            ${packages.map(pkg => `
+                                <td class="py-3 px-4 text-gray-700">${pkg.platform || 'N/A'}</td>
+                            `).join('')}
+                        </tr>
+                        <tr class="border-b border-gray-200">
+                            <td class="py-3 px-4 text-gray-600 font-medium">Created</td>
+                            ${packages.map(pkg => `
+                                <td class="py-3 px-4 text-gray-700">${new Date(pkg.created_at).toLocaleDateString()}</td>
+                            `).join('')}
+                        </tr>
+                        <tr class="border-b border-gray-200 bg-gray-50">
+                            <td class="py-3 px-4 text-gray-600 font-medium">Repository</td>
+                            ${packages.map(pkg => `
+                                <td class="py-3 px-4">
+                                    ${pkg.repository ? `<a href="${pkg.repository}" target="_blank" class="text-blue-600 hover:underline">Link</a>` : 'N/A'}
+                                </td>
+                            `).join('')}
+                        </tr>
+                        <tr class="bg-gray-50">
+                            <td class="py-3 px-4 text-gray-600 font-medium">Homepage</td>
+                            ${packages.map(pkg => `
+                                <td class="py-3 px-4">
+                                    ${pkg.homepage ? `<a href="${pkg.homepage}" target="_blank" class="text-blue-600 hover:underline">Link</a>` : 'N/A'}
+                                </td>
+                            `).join('')}
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        showModal();
+    } catch (error) {
+        showNotification('Failed to load package comparison', 'error');
+    }
 }
 
-function showPackageDetails(packageId) {
-    // This would show detailed package information
-    showNotification('Package details feature coming soon!', 'info');
-}
+async function showPackageDetails(packageId) {
+    try {
+        const response = await fetch(`/api/packages/${packageId}`);
 
-// Analytics functionality
-function loadAnalyticsData() {
-    // Simulate loading real analytics data
-    animateCounters();
-    updateCharts();
-}
-
-function animateCounters() {
-    const counters = [
-        { id: 'total-packages', target: 1234567, duration: 2000 },
-        { id: 'active-maintainers', target: 89123, duration: 1800 },
-        { id: 'programming-languages', target: 156, duration: 1000 },
-        { id: 'weekly-updates', target: 45678, duration: 1500 }
-    ];
-    
-    counters.forEach(counter => {
-        const element = document.getElementById(counter.id);
-        if (element) {
-            let start = 0;
-            const startTime = Date.now();
-            
-            const animate = () => {
-                const elapsed = Date.now() - startTime;
-                const progress = Math.min(elapsed / counter.duration, 1);
-                
-                // Easing function
-                const easeOut = 1 - Math.pow(1 - progress, 3);
-                const current = Math.floor(start + (counter.target - start) * easeOut);
-                
-                element.textContent = current.toLocaleString();
-                
-                if (progress < 1) {
-                    requestAnimationFrame(animate);
-                }
-            };
-            
-            animate();
+        if (!response.ok) {
+            showNotification('Failed to load package details', 'error');
+            return;
         }
-    });
+
+        const pkg = await response.json();
+
+        const modalContent = document.getElementById('modal-content');
+        modalContent.innerHTML = `
+            <div class="space-y-6">
+                <div>
+                    <h2 class="text-3xl font-bold text-gray-800 mb-2">${pkg.name}</h2>
+                    <p class="text-gray-600">${pkg.description || 'No description available'}</p>
+                </div>
+
+                ${pkg.tags && pkg.tags.length > 0 ? `
+                    <div>
+                        <h3 class="text-sm font-semibold text-gray-700 mb-2">Tags</h3>
+                        <div class="flex flex-wrap gap-2">
+                            ${pkg.tags.map(tag => `
+                                <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">
+                                    ${tag}
+                                </span>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+
+                <div class="grid grid-cols-2 gap-4">
+                    ${pkg.license ? `
+                        <div>
+                            <h3 class="text-sm font-semibold text-gray-700 mb-1">License</h3>
+                            <p class="text-gray-600">${pkg.license}</p>
+                        </div>
+                    ` : ''}
+
+                    ${pkg.platform ? `
+                        <div>
+                            <h3 class="text-sm font-semibold text-gray-700 mb-1">Platform</h3>
+                            <p class="text-gray-600">${pkg.platform}</p>
+                        </div>
+                    ` : ''}
+
+                    ${pkg.language ? `
+                        <div>
+                            <h3 class="text-sm font-semibold text-gray-700 mb-1">Language</h3>
+                            <p class="text-gray-600">${pkg.language}</p>
+                        </div>
+                    ` : ''}
+
+                    ${pkg.maintainers && pkg.maintainers.length > 0 ? `
+                        <div>
+                            <h3 class="text-sm font-semibold text-gray-700 mb-1">Maintainers</h3>
+                            <p class="text-gray-600">${pkg.maintainers.join(', ')}</p>
+                        </div>
+                    ` : ''}
+                </div>
+
+                <div class="flex gap-4">
+                    ${pkg.homepage ? `
+                        <a href="${pkg.homepage}" target="_blank"
+                           class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                            Homepage
+                        </a>
+                    ` : ''}
+                    ${pkg.repository ? `
+                        <a href="${pkg.repository}" target="_blank"
+                           class="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors">
+                            Repository
+                        </a>
+                    ` : ''}
+                </div>
+
+                <div class="text-xs text-gray-500 pt-4 border-t border-gray-200">
+                    Created: ${new Date(pkg.created_at).toLocaleDateString()} |
+                    Updated: ${new Date(pkg.updated_at).toLocaleDateString()}
+                    ${pkg.submitted_by ? ` | Submitted by: ${pkg.submitted_by}` : ''}
+                </div>
+            </div>
+        `;
+
+        showModal();
+    } catch (error) {
+        showNotification('Failed to load package details', 'error');
+    }
 }
 
-function updateCharts() {
-    // Add sparkline animations
-    const chartBars = document.querySelectorAll('#analytics-page .bg-gradient-to-t');
-    chartBars.forEach((bar, index) => {
-        setTimeout(() => {
-            bar.style.transition = 'height 0.8s ease-out';
-            bar.style.height = bar.style.height || '50%';
-        }, index * 100);
-    });
-}
+// Analytics functionality removed - use /api/analytics endpoint directly
 
 // Load saved preferences
 document.addEventListener('DOMContentLoaded', () => {

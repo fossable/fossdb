@@ -11,10 +11,13 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
+        // Require JWT_SECRET to be set - no insecure defaults
+        let jwt_secret = env::var("JWT_SECRET")
+            .expect("JWT_SECRET environment variable must be set. Generate a secure random string.");
+
         Self {
             database_path: env::var("DATABASE_PATH").unwrap_or_else(|_| "./foss.db".to_string()),
-            jwt_secret: env::var("JWT_SECRET")
-                .unwrap_or_else(|_| "your-secret-key-change-this".to_string()),
+            jwt_secret,
             server_port: env::var("SERVER_PORT")
                 .unwrap_or_else(|_| "3000".to_string())
                 .parse()
