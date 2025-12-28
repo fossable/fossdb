@@ -159,6 +159,16 @@ impl Database {
         Ok(all)
     }
 
+    pub fn update_user(&self, user: User) -> Result<()> {
+        let rw = self.db.rw_transaction()?;
+        if let Some(old) = rw.get().primary::<User>(user.id)? {
+            rw.remove(old)?;
+        }
+        rw.insert(user)?;
+        rw.commit()?;
+        Ok(())
+    }
+
     // Vulnerability operations
     pub fn insert_vulnerability(&self, mut vuln: Vulnerability) -> Result<Vulnerability> {
         if vuln.id == 0 {
@@ -209,5 +219,43 @@ impl Database {
             .start_with(package_id)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(events)
+    }
+
+    pub fn update_timeline_event(&self, event: TimelineEvent) -> Result<()> {
+        let rw = self.db.rw_transaction()?;
+        if let Some(old) = rw.get().primary::<TimelineEvent>(event.id)? {
+            rw.remove(old)?;
+        }
+        rw.insert(event)?;
+        rw.commit()?;
+        Ok(())
+    }
+
+    pub fn get_timeline_events_by_user(&self, user_id: u64) -> Result<Vec<TimelineEvent>> {
+        let r = self.db.r_transaction()?;
+        let events: Vec<TimelineEvent> = r.scan().secondary(TimelineEventKey::user_id)?
+            .start_with(Some(user_id))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(events)
+    }
+
+    pub fn get_pending_notifications(&self) -> Result<Vec<TimelineEvent>> {
+        let r = self.db.r_transaction()?;
+        let all_events: Vec<TimelineEvent> = r.scan().primary()?.all()?.collect::<Result<Vec<_>, _>>()?;
+        // Filter in memory - native_db doesn't support complex queries
+        // For better scalability, consider adding a compound index or separate pending_notifications table
+        Ok(all_events
+            .into_iter()
+            .filter(|e| e.user_id.is_some() && e.notified_at.is_none() && e.event_type == crate::models::EventType::NewRelease)
+            .collect())
+    }
+
+    pub fn get_users_subscribed_to(&self, package_name: &str) -> Result<Vec<u64>> {
+        let all_users = self.get_all_users()?;
+        Ok(all_users
+            .into_iter()
+            .filter(|u| u.subscriptions.contains(&package_name.to_string()))
+            .map(|u| u.id)
+            .collect())
     }
 }

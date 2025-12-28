@@ -198,7 +198,8 @@ impl Scraper for LibrariesIoScraper {
     }
 
     async fn scrape(&self, db: Arc<crate::db::Database>) -> Result<()> {
-        use crate::models::{Package, PackageVersion};
+        use crate::models::{Package, PackageVersion, TimelineEvent, EventType};
+        use std::collections::HashSet;
 
         // Get list of supported platforms
         let platforms = self.get_platforms().await?;
@@ -218,11 +219,87 @@ impl Scraper for LibrariesIoScraper {
                         for package_data in packages {
                             // Check if package already exists
                             match db.get_package_by_name(&package_data.name) {
-                                Ok(Some(_)) => {
+                                Ok(Some(existing_package)) => {
+                                    // Package exists - check for new versions
                                     tracing::debug!(
-                                        "Package {} already exists, skipping",
+                                        "Package {} exists, checking for new versions",
                                         package_data.name
                                     );
+
+                                    let existing_versions = match db.get_versions_by_package(existing_package.id) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            tracing::error!("Failed to get existing versions for {}: {}", package_data.name, e);
+                                            continue;
+                                        }
+                                    };
+
+                                    let existing_version_nums: HashSet<String> = existing_versions
+                                        .iter()
+                                        .map(|v| v.version.clone())
+                                        .collect();
+
+                                    let now = chrono::Utc::now();
+
+                                    for version_data in package_data.versions {
+                                        if !existing_version_nums.contains(&version_data.version) {
+                                            // New version found
+                                            tracing::info!("New version detected: {} {}", package_data.name, version_data.version);
+
+                                            let version = PackageVersion {
+                                                id: 0,
+                                                package_id: existing_package.id,
+                                                version: version_data.version.clone(),
+                                                release_date: version_data.release_date,
+                                                download_url: version_data.download_url,
+                                                checksum: version_data.checksum,
+                                                dependencies: version_data.dependencies,
+                                                vulnerabilities: Vec::new(),
+                                                changelog: version_data.changelog,
+                                                created_at: now,
+                                            };
+
+                                            if let Ok(_) = db.insert_version(version) {
+                                                tracing::info!("Saved new version {} for {}", version_data.version, package_data.name);
+
+                                                // Create timeline events for subscribed users
+                                                if let Ok(subscribed_users) = db.get_users_subscribed_to(&package_data.name) {
+                                                    for user_id in subscribed_users {
+                                                        let event = TimelineEvent {
+                                                            id: 0,
+                                                            package_id: existing_package.id,
+                                                            user_id: Some(user_id),
+                                                            event_type: EventType::NewRelease,
+                                                            package_name: package_data.name.clone(),
+                                                            version: Some(version_data.version.clone()),
+                                                            description: format!("New version {} released", version_data.version),
+                                                            created_at: now,
+                                                            notified_at: None,
+                                                        };
+
+                                                        if let Err(e) = db.insert_timeline_event(event) {
+                                                            tracing::error!("Failed to create timeline event for user {}: {}", user_id, e);
+                                                        }
+                                                    }
+                                                }
+
+                                                // Create global timeline event for public timeline
+                                                let global_event = TimelineEvent {
+                                                    id: 0,
+                                                    package_id: existing_package.id,
+                                                    user_id: None,
+                                                    event_type: EventType::NewRelease,
+                                                    package_name: package_data.name.clone(),
+                                                    version: Some(version_data.version.clone()),
+                                                    description: format!("New version {} released", version_data.version),
+                                                    created_at: now,
+                                                    notified_at: None,
+                                                };
+
+                                                let _ = db.insert_timeline_event(global_event);
+                                            }
+                                        }
+                                    }
                                     continue;
                                 }
                                 Ok(None) => {

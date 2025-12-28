@@ -30,7 +30,8 @@ impl Scraper for CratesIoScraper {
 
     async fn scrape(&self, db: Arc<crate::db::Database>) -> Result<()> {
         use chrono::Utc;
-        use crate::models::{Package, PackageVersion};
+        use crate::models::{Package, PackageVersion, TimelineEvent, EventType};
+        use std::collections::HashSet;
 
         // Scrape first 3 pages of recently updated crates
         for page in 1..=3 {
@@ -51,8 +52,89 @@ impl Scraper for CratesIoScraper {
 
                 // Check if package already exists
                 match db.get_package_by_name(&crate_name) {
-                    Ok(Some(_)) => {
-                        tracing::debug!("Package {} already exists, skipping", crate_name);
+                    Ok(Some(existing_package)) => {
+                        // Package exists - check for new versions
+                        tracing::debug!("Package {} exists, checking for new versions", crate_name);
+
+                        match self.client.full_crate(&crate_name, false).await {
+                            Ok(full_crate) => {
+                                let existing_versions = db.get_versions_by_package(existing_package.id)?;
+                                let existing_version_nums: HashSet<String> = existing_versions
+                                    .iter()
+                                    .map(|v| v.version.clone())
+                                    .collect();
+
+                                let now = Utc::now();
+
+                                // Check for new versions
+                                for v in full_crate.versions.iter()
+                                    .filter(|v| !v.yanked)
+                                    .take(10)
+                                {
+                                    if !existing_version_nums.contains(&v.num) {
+                                        // NEW VERSION FOUND!
+                                        tracing::info!("New version detected: {} {}", crate_name, v.num);
+
+                                        let version = PackageVersion {
+                                            id: 0,
+                                            package_id: existing_package.id,
+                                            version: v.num.clone(),
+                                            release_date: v.created_at,
+                                            download_url: Some(format!("https://crates.io{}", v.dl_path)),
+                                            checksum: None,
+                                            dependencies: Vec::new(),
+                                            vulnerabilities: Vec::new(),
+                                            changelog: None,
+                                            created_at: now,
+                                        };
+
+                                        // Save version
+                                        if let Ok(_saved_version) = db.insert_version(version) {
+                                            tracing::info!("Saved new version {} for {}", v.num, crate_name);
+
+                                            // Create timeline events for subscribed users
+                                            if let Ok(subscribed_users) = db.get_users_subscribed_to(&crate_name) {
+                                                for user_id in subscribed_users {
+                                                    let event = TimelineEvent {
+                                                        id: 0,
+                                                        package_id: existing_package.id,
+                                                        user_id: Some(user_id),
+                                                        event_type: EventType::NewRelease,
+                                                        package_name: crate_name.clone(),
+                                                        version: Some(v.num.clone()),
+                                                        description: format!("New version {} released", v.num),
+                                                        created_at: now,
+                                                        notified_at: None,
+                                                    };
+
+                                                    if let Err(e) = db.insert_timeline_event(event) {
+                                                        tracing::error!("Failed to create timeline event for user {}: {}", user_id, e);
+                                                    }
+                                                }
+                                            }
+
+                                            // Create global timeline event for public timeline
+                                            let global_event = TimelineEvent {
+                                                id: 0,
+                                                package_id: existing_package.id,
+                                                user_id: None,
+                                                event_type: EventType::NewRelease,
+                                                package_name: crate_name.clone(),
+                                                version: Some(v.num.clone()),
+                                                description: format!("New version {} released", v.num),
+                                                created_at: now,
+                                                notified_at: None,
+                                            };
+
+                                            let _ = db.insert_timeline_event(global_event);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to fetch crate details for {}: {}", crate_name, e);
+                            }
+                        }
                         continue;
                     }
                     Ok(None) => {

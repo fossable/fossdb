@@ -13,10 +13,12 @@ mod auth;
 mod client;
 mod config;
 mod db;
+mod email;
 mod handlers;
 mod id_generator;
 mod middleware;
 mod models;
+mod notifications;
 mod scraper_models;
 mod scrapers;
 
@@ -89,6 +91,36 @@ async fn main() -> anyhow::Result<()> {
             let interval_hours = config.scraper_interval_hours;
             tokio::spawn(async move { run_scraper_loop(scraper, db, interval_hours).await });
         }
+        // Initialize notification processor
+        if config.email_enabled {
+            tracing::info!("Starting notification processor...");
+
+            let email_service = Arc::new(
+                email::EmailService::new(config.clone())
+                    .expect("Failed to initialize email service")
+            );
+
+            let processor = notifications::NotificationProcessor::new(
+                db.clone(),
+                email_service,
+            );
+
+            let notification_interval_minutes = 5;
+
+            tokio::spawn(async move {
+                loop {
+                    if let Err(e) = processor.process_new_releases().await {
+                        tracing::error!("Notification processing error: {}", e);
+                    }
+
+                    tokio::time::sleep(tokio::time::Duration::from_secs(
+                        notification_interval_minutes * 60
+                    )).await;
+                }
+            });
+        } else {
+            tracing::info!("Email disabled, notification processor not started");
+        }
     } else {
         tracing::info!("Scrapers disabled via --no-scrapers flag");
     }
@@ -98,7 +130,23 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/packages", post(handlers::packages::create_package))
         .route(
             "/api/users/subscriptions",
+            get(handlers::users::get_subscriptions),
+        )
+        .route(
+            "/api/users/subscriptions",
             post(handlers::users::add_subscription),
+        )
+        .route(
+            "/api/users/subscriptions/:package_name",
+            axum::routing::delete(handlers::users::remove_subscription),
+        )
+        .route(
+            "/api/users/settings/notifications",
+            get(handlers::users::get_notification_settings),
+        )
+        .route(
+            "/api/users/settings/notifications",
+            axum::routing::put(handlers::users::update_notification_settings),
         )
         .layer(axum::middleware::from_fn(middleware::auth_middleware))
         .with_state(state.clone());
@@ -116,10 +164,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/auth/login", post(handlers::auth::login))
         .route("/api/auth/login-form", post(handlers::auth::login_form))
         .route("/api/users/timeline", get(handlers::users::get_timeline))
-        .route(
-            "/api/users/subscriptions",
-            get(handlers::users::get_subscriptions),
-        )
         .route("/api/analytics", get(handlers::analytics::get_analytics))
         .route(
             "/api/analytics/languages",

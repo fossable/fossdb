@@ -67,6 +67,7 @@ pub struct User {
     pub subscriptions: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub is_verified: bool,
+    pub notifications_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,11 +107,14 @@ pub struct TimelineEvent {
     pub id: u64,
     #[secondary_key]
     pub package_id: u64,
+    #[secondary_key]
+    pub user_id: Option<u64>,
     pub event_type: EventType,
     pub package_name: String,
     pub version: Option<String>,
     pub description: String,
     pub created_at: DateTime<Utc>,
+    pub notified_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

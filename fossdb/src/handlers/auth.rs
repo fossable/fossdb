@@ -53,6 +53,7 @@ async fn register_user(
         subscriptions: Vec::new(),
         created_at: Utc::now(),
         is_verified: false,
+        notifications_enabled: true,  // Enable notifications by default
     };
 
     let user = state.db.insert_user(user)
