@@ -2,7 +2,7 @@
 let currentUser = null;
 let authToken = null;
 let currentViewMode = 'grid';
-let subscriptionsCache = new Set();
+let subscriptionsCache = new Map(); // Map of package_name -> { package_name, notifications_enabled }
 let comparisonList = [];
 let timelineWebSocket = null;
 let timelineOffset = 0;
@@ -173,11 +173,13 @@ function hideAllPages() {
     const homePage = document.getElementById('home-page');
     const packagesPage = document.getElementById('packages-page');
     const subscriptionsPage = document.getElementById('subscriptions-page');
+    const packageDetailPage = document.getElementById('package-detail-page');
     const apiPage = document.getElementById('api-page');
 
     if (homePage) homePage.classList.add('hidden');
     if (packagesPage) packagesPage.classList.add('hidden');
     if (subscriptionsPage) subscriptionsPage.classList.add('hidden');
+    if (packageDetailPage) packageDetailPage.classList.add('hidden');
     if (apiPage) apiPage.classList.add('hidden');
 }
 
@@ -720,7 +722,7 @@ function renderPackagesGrid(packages, target) {
 
             <div class="mb-4">
                 <div class="pr-12">
-                    <h3 class="text-xl font-bold text-gray-100 mb-2 hover:text-blue-400 transition-colors cursor-pointer" onclick="showPackageDetails('${pkg.id}')">${pkg.name}</h3>
+                    <h3 class="text-xl font-bold text-gray-100 mb-2 hover:text-blue-400 transition-colors cursor-pointer" onclick="showPackageDetailPage('${pkg.id}')">${pkg.name}</h3>
                     <p class="text-gray-400 leading-relaxed">${pkg.description || 'No description available'}</p>
                 </div>
             </div>
@@ -784,7 +786,7 @@ function renderPackagesList(packages, target) {
 
             <div class="flex-1 pr-12">
                 <div class="mb-2">
-                    <h3 class="text-xl font-bold text-gray-100 hover:text-blue-400 transition-colors cursor-pointer" onclick="showPackageDetails('${pkg.id}')">${pkg.name}</h3>
+                    <h3 class="text-xl font-bold text-gray-100 hover:text-blue-400 transition-colors cursor-pointer" onclick="showPackageDetailPage('${pkg.id}')">${pkg.name}</h3>
                 </div>
                 <p class="text-gray-400 mb-3">${pkg.description || 'No description available'}</p>
                 
@@ -1005,10 +1007,10 @@ async function toggleSubscription(packageName) {
                 throw new Error('Failed to subscribe');
             }
 
-            subscriptionsCache.add(packageName);
+            // Reload subscriptions from server to get the full object
+            await loadSubscriptionsCache();
             showNotification(`Subscribed to ${packageName}`, 'success');
             updateSubscriptionButtons(packageName);
-            saveSubscriptionsToCache();
         } catch (error) {
             showNotification('Failed to subscribe. Please try again.', 'error');
         }
@@ -1034,7 +1036,8 @@ function updateSubscriptionButtons(packageName) {
 }
 
 function saveSubscriptionsToCache() {
-    localStorage.setItem('subscriptions', JSON.stringify([...subscriptionsCache]));
+    const subsArray = Array.from(subscriptionsCache.values());
+    localStorage.setItem('subscriptions', JSON.stringify(subsArray));
 }
 
 async function loadSubscriptionsCache() {
@@ -1052,14 +1055,21 @@ async function loadSubscriptionsCache() {
 
         if (response.ok) {
             const data = await response.json();
-            subscriptionsCache = new Set(data.subscriptions || []);
+            subscriptionsCache.clear();
+            (data.subscriptions || []).forEach(sub => {
+                subscriptionsCache.set(sub.package_name, sub);
+            });
             saveSubscriptionsToCache();
         }
     } catch (error) {
         // Fallback to localStorage
         const savedSubscriptions = localStorage.getItem('subscriptions');
         if (savedSubscriptions) {
-            subscriptionsCache = new Set(JSON.parse(savedSubscriptions));
+            const subs = JSON.parse(savedSubscriptions);
+            subscriptionsCache.clear();
+            subs.forEach(sub => {
+                subscriptionsCache.set(sub.package_name, sub);
+            });
         }
     }
 }
@@ -1218,108 +1228,332 @@ async function showComparison() {
     }
 }
 
-async function showPackageDetails(packageId) {
-    try {
-        const response = await fetch(`/api/packages/${packageId}`);
+// Render versions table with pagination
+function renderVersionsTable(versions, packageId, currentPage = 1, pageSize = 10) {
+    const versionsTable = document.getElementById('versions-table');
 
-        if (!response.ok) {
-            showNotification('Failed to load package details', 'error');
-            return;
-        }
+    if (versions.length === 0) {
+        versionsTable.innerHTML = `
+            <div class="text-center py-8 text-gray-400">
+                <p>No versions available for this package</p>
+            </div>
+        `;
+        return;
+    }
 
-        const pkg = await response.json();
+    // Calculate pagination
+    const totalPages = Math.ceil(versions.length / pageSize);
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const paginatedVersions = versions.slice(startIndex, endIndex);
 
-        const modalContent = document.getElementById('modal-content');
-        modalContent.innerHTML = `
-            <div class="space-y-6">
-                <div>
-                    <h2 class="text-3xl font-bold text-gray-800 mb-2">${pkg.name}</h2>
-                    <p class="text-gray-600">${pkg.description || 'No description available'}</p>
+    versionsTable.innerHTML = `
+        <!-- Page size selector -->
+        <div class="flex justify-between items-center mb-4">
+            <div class="text-sm text-gray-400">
+                Showing ${startIndex + 1}-${Math.min(endIndex, versions.length)} of ${versions.length} versions
+            </div>
+            <div class="flex items-center gap-2">
+                <label class="text-sm text-gray-400">Per page:</label>
+                <select id="versions-page-size"
+                        onchange="renderVersionsTableFromCache('${packageId}', 1, parseInt(this.value))"
+                        class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-300">
+                    <option value="5" ${pageSize === 5 ? 'selected' : ''}>5</option>
+                    <option value="10" ${pageSize === 10 ? 'selected' : ''}>10</option>
+                    <option value="25" ${pageSize === 25 ? 'selected' : ''}>25</option>
+                    <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
+                    <option value="${versions.length}" ${pageSize === versions.length ? 'selected' : ''}>All</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Versions table -->
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="border-b border-gray-700">
+                    <tr>
+                        <th class="text-left py-3 px-4 text-gray-300 font-semibold">Version</th>
+                        <th class="text-left py-3 px-4 text-gray-300 font-semibold">Release Date</th>
+                        <th class="text-left py-3 px-4 text-gray-300 font-semibold">Vulnerabilities</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-700">
+                    ${paginatedVersions.map(version => `
+                        <tr class="hover:bg-gray-700 transition-colors">
+                            <td class="py-3 px-4">
+                                <span class="font-mono text-blue-400">${version.version}</span>
+                            </td>
+                            <td class="py-3 px-4 text-gray-300">
+                                ${new Date(version.release_date).toLocaleDateString()}
+                            </td>
+                            <td class="py-3 px-4">
+                                ${version.vulnerabilities && version.vulnerabilities.length > 0
+                                    ? `<span class="bg-red-900 text-red-300 px-2 py-1 rounded text-xs">${version.vulnerabilities.length}</span>`
+                                    : `<span class="text-green-400">None</span>`
+                                }
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination controls -->
+        ${totalPages > 1 ? `
+            <div class="flex justify-center items-center gap-2 mt-6">
+                <button
+                    onclick="renderVersionsTableFromCache('${packageId}', ${currentPage - 1}, ${pageSize})"
+                    ${currentPage === 1 ? 'disabled' : ''}
+                    class="px-3 py-2 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                    Previous
+                </button>
+
+                <div class="flex gap-1">
+                    ${generatePaginationButtons(currentPage, totalPages, packageId, pageSize)}
                 </div>
 
+                <button
+                    onclick="renderVersionsTableFromCache('${packageId}', ${currentPage + 1}, ${pageSize})"
+                    ${currentPage === totalPages ? 'disabled' : ''}
+                    class="px-3 py-2 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                    Next
+                </button>
+            </div>
+        ` : ''}
+    `;
+}
+
+// Generate pagination buttons
+function generatePaginationButtons(currentPage, totalPages, packageId, pageSize) {
+    const buttons = [];
+    const maxButtons = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+    let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+
+    // Adjust start if we're near the end
+    if (endPage - startPage < maxButtons - 1) {
+        startPage = Math.max(1, endPage - maxButtons + 1);
+    }
+
+    // First page button
+    if (startPage > 1) {
+        buttons.push(`
+            <button
+                onclick="renderVersionsTableFromCache('${packageId}', 1, ${pageSize})"
+                class="px-3 py-2 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors">
+                1
+            </button>
+        `);
+        if (startPage > 2) {
+            buttons.push(`<span class="px-2 text-gray-500">...</span>`);
+        }
+    }
+
+    // Page number buttons
+    for (let i = startPage; i <= endPage; i++) {
+        buttons.push(`
+            <button
+                onclick="renderVersionsTableFromCache('${packageId}', ${i}, ${pageSize})"
+                class="px-3 py-2 ${i === currentPage ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'} rounded transition-colors">
+                ${i}
+            </button>
+        `);
+    }
+
+    // Last page button
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            buttons.push(`<span class="px-2 text-gray-500">...</span>`);
+        }
+        buttons.push(`
+            <button
+                onclick="renderVersionsTableFromCache('${packageId}', ${totalPages}, ${pageSize})"
+                class="px-3 py-2 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors">
+                ${totalPages}
+            </button>
+        `);
+    }
+
+    return buttons.join('');
+}
+
+// Cache for versions data to avoid re-fetching when paginating
+const versionsCache = new Map();
+
+// Render versions table from cache
+window.renderVersionsTableFromCache = function(packageId, page, pageSize) {
+    const versions = versionsCache.get(packageId);
+    if (versions) {
+        renderVersionsTable(versions, packageId, page, pageSize);
+        // Scroll to top of versions table
+        document.getElementById('versions-table').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+};
+
+// Show package detail page (standalone page instead of modal)
+window.showPackageDetailPage = async function(packageId) {
+    disconnectTimelineWebSocket();
+    stopTimelineUpdates();
+    hideAllPages();
+
+    const packageDetailPage = document.getElementById('package-detail-page');
+    if (packageDetailPage) {
+        packageDetailPage.classList.remove('hidden');
+    }
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    // Load package data
+    try {
+        const packageResponse = await fetch(`/api/packages/${packageId}`);
+        if (!packageResponse.ok) {
+            showNotification('Failed to load package details', 'error');
+            showPackages();
+            return;
+        }
+        const pkg = await packageResponse.json();
+
+        // Render package header
+        const packageHeader = document.getElementById('package-header');
+        packageHeader.innerHTML = `
+            <div class="space-y-4">
+                <h1 class="text-4xl font-bold text-gray-100">${pkg.name}</h1>
+                <p class="text-xl text-gray-400">${pkg.description || 'No description available'}</p>
+
                 ${pkg.tags && pkg.tags.length > 0 ? `
+                    <div class="flex flex-wrap gap-2">
+                        ${pkg.tags.map(tag => `
+                            <span class="bg-blue-900 text-blue-300 px-3 py-1 rounded-full text-sm">
+                                ${tag}
+                            </span>
+                        `).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
+        // Render package info sidebar
+        const packageInfo = document.getElementById('package-info');
+        packageInfo.innerHTML = `
+            <div class="space-y-4 text-sm">
+                ${pkg.license ? `
                     <div>
-                        <h3 class="text-sm font-semibold text-gray-700 mb-2">Tags</h3>
-                        <div class="flex flex-wrap gap-2">
-                            ${pkg.tags.map(tag => `
-                                <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">
-                                    ${tag}
-                                </span>
-                            `).join('')}
-                        </div>
+                        <h4 class="font-semibold text-gray-300 mb-1">License</h4>
+                        <p class="text-gray-400">${pkg.license}</p>
                     </div>
                 ` : ''}
 
-                <div class="grid grid-cols-2 gap-4">
-                    ${pkg.license ? `
-                        <div>
-                            <h3 class="text-sm font-semibold text-gray-700 mb-1">License</h3>
-                            <p class="text-gray-600">${pkg.license}</p>
-                        </div>
-                    ` : ''}
+                ${pkg.platform ? `
+                    <div>
+                        <h4 class="font-semibold text-gray-300 mb-1">Platform</h4>
+                        <p class="text-gray-400">${pkg.platform}</p>
+                    </div>
+                ` : ''}
 
-                    ${pkg.platform ? `
-                        <div>
-                            <h3 class="text-sm font-semibold text-gray-700 mb-1">Platform</h3>
-                            <p class="text-gray-600">${pkg.platform}</p>
-                        </div>
-                    ` : ''}
+                ${pkg.language ? `
+                    <div>
+                        <h4 class="font-semibold text-gray-300 mb-1">Language</h4>
+                        <p class="text-gray-400">${pkg.language}</p>
+                    </div>
+                ` : ''}
 
-                    ${pkg.language ? `
-                        <div>
-                            <h3 class="text-sm font-semibold text-gray-700 mb-1">Language</h3>
-                            <p class="text-gray-600">${pkg.language}</p>
-                        </div>
-                    ` : ''}
+                ${pkg.maintainers && pkg.maintainers.length > 0 ? `
+                    <div>
+                        <h4 class="font-semibold text-gray-300 mb-1">Maintainers</h4>
+                        <p class="text-gray-400">${pkg.maintainers.join(', ')}</p>
+                    </div>
+                ` : ''}
 
-                    ${pkg.maintainers && pkg.maintainers.length > 0 ? `
-                        <div>
-                            <h3 class="text-sm font-semibold text-gray-700 mb-1">Maintainers</h3>
-                            <p class="text-gray-600">${pkg.maintainers.join(', ')}</p>
-                        </div>
-                    ` : ''}
+                <div>
+                    <h4 class="font-semibold text-gray-300 mb-1">Created</h4>
+                    <p class="text-gray-400">${new Date(pkg.created_at).toLocaleDateString()}</p>
                 </div>
 
-                <div class="flex gap-4">
+                <div>
+                    <h4 class="font-semibold text-gray-300 mb-1">Updated</h4>
+                    <p class="text-gray-400">${new Date(pkg.updated_at).toLocaleDateString()}</p>
+                </div>
+            </div>
+        `;
+
+        // Render action buttons
+        const packageActions = document.getElementById('package-actions');
+        packageActions.innerHTML = `
+            <div class="bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-700">
+                <h3 class="text-lg font-bold text-gray-100 mb-4">Actions</h3>
+                <div class="space-y-3">
                     ${currentUser && authToken ? (
                         subscriptionsCache.has(pkg.name) ? `
-                            <button onclick="unsubscribeFromPackage('${pkg.name}'); hideModal();"
-                                    class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
+                            <button onclick="unsubscribeFromPackage('${pkg.name}'); setTimeout(() => showPackageDetailPage('${packageId}'), 500);"
+                                    class="w-full px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium">
                                 Unsubscribe
                             </button>
                         ` : `
-                            <button onclick="subscribeToPackage('${pkg.name}'); hideModal();"
-                                    class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                            <button onclick="subscribeToPackage('${pkg.name}'); setTimeout(() => showPackageDetailPage('${packageId}'), 500);"
+                                    class="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium">
                                 Subscribe
                             </button>
                         `
                     ) : ''}
                     ${pkg.homepage ? `
                         <a href="${pkg.homepage}" target="_blank"
-                           class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                           class="block w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-center font-medium">
                             Homepage
                         </a>
                     ` : ''}
                     ${pkg.repository ? `
                         <a href="${pkg.repository}" target="_blank"
-                           class="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors">
+                           class="block w-full px-4 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors text-center font-medium">
                             Repository
                         </a>
                     ` : ''}
                 </div>
-
-                <div class="text-xs text-gray-500 pt-4 border-t border-gray-200">
-                    Created: ${new Date(pkg.created_at).toLocaleDateString()} |
-                    Updated: ${new Date(pkg.updated_at).toLocaleDateString()}
-                </div>
             </div>
         `;
 
-        showModal();
+        // Load versions
+        const versionsResponse = await fetch(`/api/packages/${packageId}/versions`);
+        if (versionsResponse.ok) {
+            const versions = await versionsResponse.json();
+            // Sort versions newest first
+            const sortedVersions = versions.sort((a, b) => new Date(b.release_date) - new Date(a.release_date));
+            // Cache versions for pagination
+            versionsCache.set(packageId, sortedVersions);
+            renderVersionsTable(sortedVersions, packageId);
+        } else {
+            const versionsTable = document.getElementById('versions-table');
+            versionsTable.innerHTML = `
+                <div class="text-center py-8 text-red-400">
+                    <p>Failed to load versions</p>
+                </div>
+            `;
+        }
+
+        // Load subscriber count
+        const subscribersResponse = await fetch(`/api/packages/${packageId}/subscribers`);
+        if (subscribersResponse.ok) {
+            const subscribersData = await subscribersResponse.json();
+            const subscriberCount = document.getElementById('subscriber-count');
+            subscriberCount.innerHTML = `
+                <div class="text-center">
+                    <div class="text-5xl font-bold text-blue-400 mb-2">${subscribersData.subscriber_count}</div>
+                    <div class="text-gray-400 text-sm">${subscribersData.subscriber_count === 1 ? 'subscriber' : 'subscribers'}</div>
+                </div>
+            `;
+        } else {
+            const subscriberCount = document.getElementById('subscriber-count');
+            subscriberCount.innerHTML = `
+                <div class="text-center text-red-400">
+                    <p>Failed to load</p>
+                </div>
+            `;
+        }
+
     } catch (error) {
         showNotification('Failed to load package details', 'error');
+        showPackages();
     }
-}
+};
 
 // Analytics functionality removed - use /api/analytics endpoint directly
 
@@ -1383,16 +1617,16 @@ async function renderSubscriptions(subscriptions, container) {
     }
 
     // Fetch package details for each subscription
-    const packagePromises = subscriptions.map(async (packageName) => {
+    const packagePromises = subscriptions.map(async (subscription) => {
         try {
-            const response = await fetch(`/api/packages?search=${encodeURIComponent(packageName)}`);
+            const response = await fetch(`/api/packages?search=${encodeURIComponent(subscription.package_name)}`);
             if (!response.ok) return null;
 
             const data = await response.json();
-            const pkg = data.packages?.find(p => p.name === packageName);
-            return pkg || { name: packageName, description: 'Package details unavailable' };
+            const pkg = data.packages?.find(p => p.name === subscription.package_name);
+            return pkg ? { ...pkg, subscription } : { name: subscription.package_name, description: 'Package details unavailable', subscription };
         } catch (error) {
-            return { name: packageName, description: 'Error loading package' };
+            return { name: subscription.package_name, description: 'Error loading package', subscription };
         }
     });
 
@@ -1402,7 +1636,7 @@ async function renderSubscriptions(subscriptions, container) {
         <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-colors">
             <div class="flex items-start justify-between">
                 <div class="flex-1 min-w-0">
-                    <h3 class="text-xl font-bold text-gray-100 mb-2 hover:text-blue-400 transition-colors cursor-pointer" onclick="showPackageDetails('${pkg.id || ''}')">${pkg.name}</h3>
+                    <h3 class="text-xl font-bold text-gray-100 mb-2 hover:text-blue-400 transition-colors cursor-pointer" onclick="showPackageDetailPage('${pkg.id || ''}')">${pkg.name}</h3>
                     <p class="text-gray-400 text-sm mb-4">${pkg.description || 'No description available'}</p>
 
                     <div class="flex flex-wrap gap-3 items-center">
@@ -1425,6 +1659,20 @@ async function renderSubscriptions(subscriptions, container) {
                 </div>
 
                 <div class="ml-4 flex flex-col space-y-2">
+                    <!-- Notification Toggle -->
+                    <label class="flex items-center justify-between px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors cursor-pointer">
+                        <span class="text-sm font-medium text-gray-300 flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+                            </svg>
+                            Email Notifications
+                        </span>
+                        <input type="checkbox"
+                               ${pkg.subscription.notifications_enabled ? 'checked' : ''}
+                               onchange="togglePackageNotifications('${pkg.name}', this.checked)"
+                               class="w-5 h-5 text-blue-600 bg-gray-800 border-gray-600 rounded focus:ring-blue-500 focus:ring-2">
+                    </label>
+
                     <button onclick="unsubscribeFromPackage('${pkg.name}')" class="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors text-sm font-medium">
                         Unsubscribe
                     </button>
@@ -1468,6 +1716,39 @@ async function subscribeToPackage(packageName) {
         showNotification(`Subscribed to ${packageName}`, 'success');
     } catch (error) {
         showNotification('Failed to subscribe. Please try again.', 'error');
+    }
+}
+
+async function togglePackageNotifications(packageName, enabled) {
+    if (!currentUser || !authToken) {
+        showNotification('Please log in first', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/subscriptions/${encodeURIComponent(packageName)}/notifications`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ notifications_enabled: enabled })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to update notification settings');
+        }
+
+        // Update local cache
+        await loadSubscriptionsCache();
+        showNotification(
+            enabled ? `Email notifications enabled for ${packageName}` : `Email notifications disabled for ${packageName}`,
+            'success'
+        );
+    } catch (error) {
+        showNotification('Failed to update notification settings. Please try again.', 'error');
+        // Reload the page to reset the toggle state
+        loadSubscriptions();
     }
 }
 

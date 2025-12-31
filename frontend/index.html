@@ -401,6 +401,76 @@
                 </div>
             </div>
 
+            <!-- Package Detail Page -->
+            <div id="package-detail-page" class="hidden min-h-screen bg-gray-900 py-12">
+                <div class="container mx-auto px-6">
+                    <div class="max-w-5xl mx-auto">
+                        <!-- Back Button -->
+                        <div class="mb-6">
+                            <button onclick="showPackages()" class="flex items-center space-x-2 text-gray-400 hover:text-blue-400 transition-colors">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                                </svg>
+                                <span>Back to Packages</span>
+                            </button>
+                        </div>
+
+                        <!-- Package Header -->
+                        <div class="bg-gray-800 rounded-2xl shadow-xl p-8 mb-6 border border-gray-700">
+                            <div id="package-header">
+                                <!-- Loading state -->
+                                <div class="flex justify-center py-12">
+                                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Package Details Grid -->
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                            <!-- Main Content -->
+                            <div class="lg:col-span-2 space-y-6">
+                                <!-- Versions Table -->
+                                <div class="bg-gray-800 rounded-2xl shadow-xl p-8 border border-gray-700">
+                                    <h2 class="text-2xl font-bold text-gray-100 mb-6">Versions</h2>
+                                    <div id="versions-table">
+                                        <!-- Loading state -->
+                                        <div class="flex justify-center py-8">
+                                            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Sidebar -->
+                            <div class="space-y-6">
+                                <!-- Subscriber Count -->
+                                <div class="bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-700">
+                                    <h3 class="text-lg font-bold text-gray-100 mb-4">Subscribers</h3>
+                                    <div id="subscriber-count" class="text-center">
+                                        <!-- Loading state -->
+                                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Package Info -->
+                                <div class="bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-700">
+                                    <h3 class="text-lg font-bold text-gray-100 mb-4">Information</h3>
+                                    <div id="package-info">
+                                        <!-- Loading state -->
+                                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Actions -->
+                                <div id="package-actions">
+                                    <!-- Loading state -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- API Documentation Page -->
             <div id="api-page" class="hidden min-h-screen bg-gray-900 py-12">
                 <div class="container mx-auto px-6">
@@ -434,7 +504,7 @@
   "total_users": 5,
   "total_vulnerabilities": 0,
   "total_timeline_events": 15,
-  "scrapers_running": ["crates.io"]
+  "collectors_running": ["crates.io"]
 }</code></pre>
                                     </div>
                                 </div>

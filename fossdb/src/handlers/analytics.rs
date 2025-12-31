@@ -13,7 +13,7 @@ pub struct DatabaseStats {
     pub total_users: u64,
     pub total_vulnerabilities: u64,
     pub total_timeline_events: u64,
-    pub scrapers_running: Vec<String>,
+    pub collectors_running: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -233,7 +233,7 @@ pub async fn get_db_stats(
         total_users: users.len() as u64,
         total_vulnerabilities: vulnerabilities.len() as u64,
         total_timeline_events: timeline_events.len() as u64,
-        scrapers_running: vec!["crates.io".to_string()],
+        collectors_running: vec!["crates.io".to_string()],
     };
 
     Ok(Json(stats))

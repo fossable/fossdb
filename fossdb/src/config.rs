@@ -7,7 +7,7 @@ pub struct Config {
     #[allow(dead_code)]
     pub server_port: u16,
     pub libraries_io_api_key: Option<String>,
-    pub scraper_interval_hours: u64,
+    pub collector_interval_hours: u64,
     pub smtp_host: String,
     pub smtp_port: u16,
     pub smtp_username: String,
@@ -31,7 +31,7 @@ impl Config {
                 .parse()
                 .unwrap_or(3000),
             libraries_io_api_key: env::var("LIBRARIES_IO_API_KEY").ok(),
-            scraper_interval_hours: env::var("SCRAPER_INTERVAL_HOURS")
+            collector_interval_hours: env::var("COLLECTOR_INTERVAL_HOURS")
                 .unwrap_or_else(|_| "1".to_string())
                 .parse()
                 .unwrap_or(1),

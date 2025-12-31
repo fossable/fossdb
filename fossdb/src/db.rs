@@ -291,7 +291,7 @@ impl Database {
         let all_users = self.get_all_users()?;
         Ok(all_users
             .into_iter()
-            .filter(|u| u.subscriptions.contains(&package_name.to_string()))
+            .filter(|u| u.subscriptions.iter().any(|s| s.package_name == package_name && s.notifications_enabled))
             .map(|u| u.id)
             .collect())
     }

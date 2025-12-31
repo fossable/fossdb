@@ -7,7 +7,7 @@ services:
       - JWT_SECRET=your-secret-key-change-this
       - SERVER_PORT=3000
       - LIBRARIES_IO_API_KEY=${LIBRARIES_IO_API_KEY:-}
-      - SCRAPER_INTERVAL_HOURS=1
+      - COLLECTOR_INTERVAL_HOURS=1
       - RUST_LOG=info
     ports:
       - "3000:3000"

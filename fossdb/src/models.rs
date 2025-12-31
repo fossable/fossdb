@@ -19,7 +19,6 @@ pub struct Package {
     pub tags: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-    pub submitted_by: Option<String>,
     pub platform: Option<String>,
     pub language: Option<String>,
     pub status: Option<String>,
@@ -53,6 +52,12 @@ pub struct Dependency {
     pub optional: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PackageSubscription {
+    pub package_name: String,
+    pub notifications_enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[native_model(id = 3, version = 1)]
 #[native_db]
@@ -64,7 +69,7 @@ pub struct User {
     #[secondary_key(unique)]
     pub username: String,
     pub password_hash: String,
-    pub subscriptions: Vec<String>,
+    pub subscriptions: Vec<PackageSubscription>,
     pub created_at: DateTime<Utc>,
     pub is_verified: bool,
     pub notifications_enabled: bool,

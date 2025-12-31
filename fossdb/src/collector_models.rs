@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 pub use crate::models::Dependency;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScrapedPackage {
+pub struct CollectedPackage {
     pub name: String,
     pub description: Option<String>,
     pub homepage: Option<String>,
@@ -13,7 +13,7 @@ pub struct ScrapedPackage {
     pub license: Option<String>,
     pub maintainers: Vec<String>,
     pub tags: Vec<String>,
-    pub versions: Vec<ScrapedVersion>,
+    pub versions: Vec<CollectedVersion>,
     pub platform: Option<String>,
     pub language: Option<String>,
     pub status: Option<String>,
@@ -22,7 +22,7 @@ pub struct ScrapedPackage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScrapedVersion {
+pub struct CollectedVersion {
     pub version: String,
     pub release_date: DateTime<Utc>,
     pub download_url: Option<String>,
@@ -32,9 +32,9 @@ pub struct ScrapedVersion {
 }
 
 #[async_trait::async_trait]
-pub trait Scraper: Send + Sync {
+pub trait Collector: Send + Sync {
     fn name(&self) -> &str;
-    async fn scrape(
+    async fn collect(
         &self,
         db: std::sync::Arc<crate::db::Database>,
         broadcaster: std::sync::Arc<crate::websocket::TimelineBroadcaster>,

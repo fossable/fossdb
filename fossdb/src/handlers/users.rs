@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{AppState, auth::Claims};
+use crate::{AppState, auth::Claims, models::PackageSubscription};
 
 #[derive(Debug, Deserialize)]
 pub struct SubscriptionRequest {
@@ -15,7 +15,12 @@ pub struct SubscriptionRequest {
 
 #[derive(Debug, Serialize)]
 pub struct SubscriptionResponse {
-    pub subscriptions: Vec<String>,
+    pub subscriptions: Vec<PackageSubscription>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdatePackageNotificationRequest {
+    pub notifications_enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,8 +128,11 @@ pub async fn add_subscription(
     }
 
     // Add subscription if not already subscribed
-    if !user.subscriptions.contains(&payload.package_name) {
-        user.subscriptions.push(payload.package_name);
+    if !user.subscriptions.iter().any(|s| s.package_name == payload.package_name) {
+        user.subscriptions.push(PackageSubscription {
+            package_name: payload.package_name,
+            notifications_enabled: true, // Default to enabled
+        });
         state.db.update_user(user.clone())
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
@@ -146,7 +154,7 @@ pub async fn remove_subscription(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    user.subscriptions.retain(|s| s != &package_name);
+    user.subscriptions.retain(|s| s.package_name != package_name);
 
     state.db.update_user(user.clone())
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -192,4 +200,33 @@ pub async fn update_notification_settings(
     Ok(Json(NotificationSettingsResponse {
         notifications_enabled: payload.notifications_enabled,
     }))
+}
+
+pub async fn update_package_notification(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(package_name): Path<String>,
+    Json(payload): Json<UpdatePackageNotificationRequest>,
+) -> Result<Json<SubscriptionResponse>, StatusCode> {
+    let user_id: u64 = claims.sub.parse()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let mut user = state.db.get_user(user_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    // Find and update the subscription
+    if let Some(subscription) = user.subscriptions.iter_mut()
+        .find(|s| s.package_name == package_name) {
+        subscription.notifications_enabled = payload.notifications_enabled;
+
+        state.db.update_user(user.clone())
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        Ok(Json(SubscriptionResponse {
+            subscriptions: user.subscriptions,
+        }))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
 }

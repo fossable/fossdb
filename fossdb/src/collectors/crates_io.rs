@@ -3,16 +3,16 @@ use async_trait::async_trait;
 use crates_io_api::{AsyncClient, Sort};
 use std::sync::Arc;
 
-use crate::scraper_models::Scraper;
+use crate::collector_models::Collector;
 
-pub struct CratesIoScraper {
+pub struct CratesIoCollector {
     client: Arc<AsyncClient>,
 }
 
-impl CratesIoScraper {
+impl CratesIoCollector {
     pub fn new(_client: reqwest::Client) -> Self {
         // crates_io_api handles rate limiting internally (1 req/s)
-        // We don't need our custom rate limiting for this scraper
+        // We don't need our custom rate limiting for this collector
         Self {
             client: Arc::new(AsyncClient::new(
                 "fossdb (https://github.com/fossable/fossdb)",
@@ -23,12 +23,12 @@ impl CratesIoScraper {
 }
 
 #[async_trait]
-impl Scraper for CratesIoScraper {
+impl Collector for CratesIoCollector {
     fn name(&self) -> &str {
         "crates.io"
     }
 
-    async fn scrape(&self, db: Arc<crate::db::Database>, broadcaster: Arc<crate::websocket::TimelineBroadcaster>) -> Result<()> {
+    async fn collect(&self, db: Arc<crate::db::Database>, broadcaster: Arc<crate::websocket::TimelineBroadcaster>) -> Result<()> {
         use chrono::Utc;
         use crate::models::{Package, PackageVersion, TimelineEvent, EventType};
         use std::collections::HashSet;
@@ -188,7 +188,6 @@ impl Scraper for CratesIoScraper {
                                     tags: vec!["rust".to_string(), "crate".to_string()],
                                     created_at: now,
                                     updated_at: krate.updated_at, // Use timestamp from search result
-                                    submitted_by: Some("scraper".to_string()),
                                     platform: Some("crates.io".to_string()),
                                     language: Some("rust".to_string()),
                                     status: None,

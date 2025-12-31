@@ -96,7 +96,6 @@ pub async fn create_package(
         tags: payload.tags,
         created_at: now,
         updated_at: now,
-        submitted_by: None,
         platform: None,
         language: None,
         status: None,
@@ -106,6 +105,44 @@ pub async fn create_package(
 
     match state.db.insert_package(package) {
         Ok(package) => Ok(Json(package)),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+pub async fn get_package_versions(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<PackageVersion>>, StatusCode> {
+    let id = id.parse::<u64>()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    match state.db.get_versions_by_package(id) {
+        Ok(versions) => Ok(Json(versions)),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+pub async fn get_package_subscriber_count(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, StatusCode> {
+    let id = id.parse::<u64>()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    // First get the package to get its name
+    let package = match state.db.get_package(id) {
+        Ok(Some(pkg)) => pkg,
+        Ok(None) => return Err(StatusCode::NOT_FOUND),
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    };
+
+    // Get subscriber count
+    match state.db.get_users_subscribed_to(&package.name) {
+        Ok(subscribers) => Ok(Json(serde_json::json!({
+            "package_id": id,
+            "package_name": package.name,
+            "subscriber_count": subscribers.len()
+        }))),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }

@@ -5,10 +5,10 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::scraper_models::{Scraper, ScrapedPackage, ScrapedVersion, Dependency};
+use crate::collector_models::{Collector, CollectedPackage, CollectedVersion, Dependency};
 use crate::client::{AdaptiveRateLimitedClient, AdaptiveConfig};
 
-pub struct LibrariesIoScraper {
+pub struct LibrariesIoCollector {
     client: AdaptiveRateLimitedClient,
     api_key: String,
 }
@@ -63,7 +63,7 @@ struct LibrariesIoPlatform {
     default_language: Option<String>,
 }
 
-impl LibrariesIoScraper {
+impl LibrariesIoCollector {
     pub fn new(client: Client, api_key: String) -> Self {
         // libraries.io has a 60 req/min rate limit for authenticated requests
         // Start conservative and let it adapt
@@ -126,7 +126,7 @@ impl LibrariesIoScraper {
         Ok(Some(project))
     }
 
-    async fn scrape_platform(&self, platform: &LibrariesIoPlatform) -> Result<Vec<ScrapedPackage>> {
+    async fn scrape_platform(&self, platform: &LibrariesIoPlatform) -> Result<Vec<CollectedPackage>> {
         let mut packages = Vec::new();
         
         // Search for popular packages on this platform
@@ -148,7 +148,7 @@ impl LibrariesIoScraper {
                         .await
                         .unwrap_or_default();
 
-                    versions.push(ScrapedVersion {
+                    versions.push(CollectedVersion {
                         version: version_num.clone(),
                         release_date: *release_date,
                         download_url: None, // Libraries.io doesn't provide direct download URLs
@@ -171,7 +171,7 @@ impl LibrariesIoScraper {
                     tags.push(format!("status:{}", status.to_lowercase()));
                 }
 
-                let package = ScrapedPackage {
+                let package = CollectedPackage {
                     name: project_details.name,
                     description: project_details.description,
                     homepage: project_details.homepage,
@@ -196,12 +196,12 @@ impl LibrariesIoScraper {
 }
 
 #[async_trait]
-impl Scraper for LibrariesIoScraper {
+impl Collector for LibrariesIoCollector {
     fn name(&self) -> &str {
         "libraries.io"
     }
 
-    async fn scrape(&self, db: Arc<crate::db::Database>, broadcaster: Arc<crate::websocket::TimelineBroadcaster>) -> Result<()> {
+    async fn collect(&self, db: Arc<crate::db::Database>, broadcaster: Arc<crate::websocket::TimelineBroadcaster>) -> Result<()> {
         use crate::models::{Package, PackageVersion, TimelineEvent, EventType};
         use std::collections::HashSet;
 
@@ -327,7 +327,6 @@ impl Scraper for LibrariesIoScraper {
                                         tags: package_data.tags,
                                         created_at: now,
                                         updated_at: now,
-                                        submitted_by: Some("scraper".to_string()),
                                         platform: package_data.platform,
                                         language: package_data.language,
                                         status: package_data.status,
