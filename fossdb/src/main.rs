@@ -7,7 +7,6 @@ use clap::Parser;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
-use tracing_subscriber;
 
 mod auth;
 mod client;
@@ -21,6 +20,7 @@ mod models;
 mod notifications;
 mod scraper_models;
 mod scrapers;
+mod websocket;
 
 use db::Database;
 
@@ -37,6 +37,7 @@ struct Args {
 #[derive(Clone)]
 pub struct AppState {
     db: Arc<Database>,
+    broadcaster: Arc<websocket::TimelineBroadcaster>,
 }
 
 #[tokio::main]
@@ -66,7 +67,13 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("  Vulnerabilities: {}", num_vulnerabilities);
     tracing::info!("  Timeline Events: {}", num_timeline_events);
 
-    let state = AppState { db: db.clone() };
+    // Initialize timeline broadcaster
+    let broadcaster = Arc::new(websocket::TimelineBroadcaster::new());
+
+    let state = AppState {
+        db: db.clone(),
+        broadcaster: broadcaster.clone(),
+    };
 
     // Initialize scrapers (if not disabled)
     if !args.no_scrapers {
@@ -88,8 +95,11 @@ async fn main() -> anyhow::Result<()> {
         // Spawn one background task per scraper
         for scraper in scrapers {
             let db = db.clone();
+            let broadcaster_clone = broadcaster.clone();
             let interval_hours = config.scraper_interval_hours;
-            tokio::spawn(async move { run_scraper_loop(scraper, db, interval_hours).await });
+            tokio::spawn(async move {
+                run_scraper_loop(scraper, db, broadcaster_clone, interval_hours).await
+            });
         }
         // Initialize notification processor
         if config.email_enabled {
@@ -97,13 +107,10 @@ async fn main() -> anyhow::Result<()> {
 
             let email_service = Arc::new(
                 email::EmailService::new(config.clone())
-                    .expect("Failed to initialize email service")
+                    .expect("Failed to initialize email service"),
             );
 
-            let processor = notifications::NotificationProcessor::new(
-                db.clone(),
-                email_service,
-            );
+            let processor = notifications::NotificationProcessor::new(db.clone(), email_service);
 
             let notification_interval_minutes = 5;
 
@@ -114,8 +121,9 @@ async fn main() -> anyhow::Result<()> {
                     }
 
                     tokio::time::sleep(tokio::time::Duration::from_secs(
-                        notification_interval_minutes * 60
-                    )).await;
+                        notification_interval_minutes * 60,
+                    ))
+                    .await;
                 }
             });
         } else {
@@ -137,7 +145,7 @@ async fn main() -> anyhow::Result<()> {
             post(handlers::users::add_subscription),
         )
         .route(
-            "/api/users/subscriptions/:package_name",
+            "/api/users/subscriptions/{package_name}",
             axum::routing::delete(handlers::users::remove_subscription),
         )
         .route(
@@ -149,6 +157,15 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::put(handlers::users::update_notification_settings),
         )
         .layer(axum::middleware::from_fn(middleware::auth_middleware))
+        .with_state(state.clone());
+
+    // Timeline route with optional auth - shows global timeline for logged-out users,
+    // personal timeline for logged-in users
+    let timeline_route = Router::new()
+        .route("/api/users/timeline", get(handlers::users::get_timeline))
+        .layer(axum::middleware::from_fn(
+            middleware::optional_auth_middleware,
+        ))
         .with_state(state.clone());
 
     let app = Router::new()
@@ -163,7 +180,6 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/auth/login", post(handlers::auth::login))
         .route("/api/auth/login-form", post(handlers::auth::login_form))
-        .route("/api/users/timeline", get(handlers::users::get_timeline))
         .route("/api/analytics", get(handlers::analytics::get_analytics))
         .route(
             "/api/analytics/languages",
@@ -173,6 +189,8 @@ async fn main() -> anyhow::Result<()> {
             "/api/analytics/security",
             get(handlers::analytics::get_security_report),
         )
+        .route("/ws/timeline", get(websocket::timeline_websocket_handler))
+        .merge(timeline_route)
         .merge(protected)
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -194,6 +212,7 @@ async fn health_check() -> Json<Value> {
 async fn run_scraper_loop(
     scraper: Arc<dyn scraper_models::Scraper + Send + Sync>,
     db: Arc<Database>,
+    broadcaster: Arc<websocket::TimelineBroadcaster>,
     interval_hours: u64,
 ) {
     let scraper_name = scraper.name();
@@ -201,7 +220,7 @@ async fn run_scraper_loop(
     loop {
         tracing::info!("Starting scraper: {}", scraper_name);
 
-        match scraper.scrape(db.clone()).await {
+        match scraper.scrape(db.clone(), broadcaster.clone()).await {
             Ok(()) => {
                 tracing::info!("Scraper {} completed successfully", scraper_name);
             }

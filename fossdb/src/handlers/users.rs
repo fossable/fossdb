@@ -1,5 +1,5 @@
 use axum::{
-    extract::{State, Extension, Path},
+    extract::{State, Extension, Path, Query},
     http::StatusCode,
     response::Json,
 };
@@ -28,16 +28,61 @@ pub struct NotificationSettingsResponse {
     pub notifications_enabled: bool,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TimelineQuery {
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
 pub async fn get_timeline(
     State(state): State<AppState>,
+    Query(params): Query<TimelineQuery>,
+    claims: Option<Extension<Claims>>,
 ) -> Result<Json<Value>, StatusCode> {
-    match state.db.get_all_timeline_events() {
-        Ok(events) => {
-            Ok(Json(serde_json::json!({
-                "events": events
-            })))
-        }
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    // If user is logged in, return their personal timeline (paginated)
+    // Otherwise, return the global timeline (limited to 50)
+    let is_authenticated = claims.is_some();
+    let mut events = if let Some(Extension(claims)) = claims {
+        // User is logged in - get their personal timeline
+        let user_id: u64 = claims.sub.parse()
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+        state.db.get_timeline_events_by_user(user_id)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    } else {
+        // No user logged in - get global timeline (events with user_id = None)
+        let all_events = state.db.get_all_timeline_events()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        // Filter to only global events (user_id is None) and limit to 50
+        all_events.into_iter()
+            .filter(|event| event.user_id.is_none())
+            .take(50)
+            .collect()
+    };
+
+    // For personal timelines, apply pagination
+    let total = events.len();
+    if is_authenticated {
+        let limit = params.limit.unwrap_or(20).min(100);
+        let offset = params.offset.unwrap_or(0);
+
+        events = events.into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect();
+
+        Ok(Json(serde_json::json!({
+            "events": events,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        })))
+    } else {
+        // Global timeline - no pagination metadata
+        Ok(Json(serde_json::json!({
+            "events": events
+        })))
     }
 }
 

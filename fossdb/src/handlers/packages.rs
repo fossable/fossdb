@@ -10,6 +10,7 @@ use serde_json::Value;
 use crate::{models::*, AppState};
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct ListPackagesQuery {
     page: Option<u32>,
     limit: Option<u32>,
@@ -22,10 +23,42 @@ pub async fn list_packages(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, StatusCode> {
     match state.db.get_all_packages() {
-        Ok(packages) => {
+        Ok(mut packages) => {
+            // Filter by search term if provided
+            if let Some(search) = &params.search {
+                let search_lower = search.to_lowercase();
+                packages.retain(|pkg| {
+                    pkg.name.to_lowercase().contains(&search_lower)
+                        || pkg.description.as_ref()
+                            .map(|d| d.to_lowercase().contains(&search_lower))
+                            .unwrap_or(false)
+                });
+            }
+
+            // Filter by tag if provided
+            if let Some(tag) = &params.tag {
+                packages.retain(|pkg| {
+                    pkg.tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
+                });
+            }
+
+            // Apply pagination
+            let total = packages.len();
+            let limit = params.limit.unwrap_or(50).min(100) as usize;
+            let page = params.page.unwrap_or(1).max(1);
+            let offset = ((page - 1) * limit as u32) as usize;
+
+            let paginated_packages: Vec<Package> = packages
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .collect();
+
             Ok(Json(serde_json::json!({
-                "packages": packages,
-                "total": packages.len()
+                "packages": paginated_packages,
+                "total": total,
+                "page": page,
+                "limit": limit
             })))
         }
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),

@@ -86,6 +86,7 @@
                 <div class="hidden md:flex items-center space-x-8">
                     <a href="#" id="nav-home" class="nav-link text-gray-300 hover:text-blue-400 font-medium transition-colors" onclick="showHome(); return false;">Home</a>
                     <a href="#" id="nav-packages" class="nav-link text-gray-300 hover:text-blue-400 font-medium transition-colors" onclick="showPackages(); return false;">Packages</a>
+                    <a href="#" id="nav-subscriptions" class="nav-link text-gray-300 hover:text-blue-400 font-medium transition-colors hidden" onclick="showSubscriptions(); return false;">Subscriptions</a>
                     <a href="#" id="nav-api" class="nav-link text-gray-300 hover:text-blue-400 font-medium transition-colors" onclick="showAPI(); return false;">API</a>
                     <div id="auth-buttons" class="flex items-center space-x-3">
                         <button onclick="showLogin()" class="px-4 py-2 text-blue-400 hover:bg-gray-700 rounded-lg font-medium transition-all">Login</button>
@@ -110,6 +111,7 @@
                 <div class="flex flex-col space-y-3 pt-4">
                     <a href="#" id="mobile-nav-home" class="nav-link text-gray-300 hover:text-blue-400 font-medium" onclick="showHome(); return false;">Home</a>
                     <a href="#" id="mobile-nav-packages" class="nav-link text-gray-300 hover:text-blue-400 font-medium" onclick="showPackages(); return false;">Packages</a>
+                    <a href="#" id="mobile-nav-subscriptions" class="nav-link text-gray-300 hover:text-blue-400 font-medium hidden" onclick="showSubscriptions(); return false;">Subscriptions</a>
                     <a href="#" id="mobile-nav-api" class="nav-link text-gray-300 hover:text-blue-400 font-medium" onclick="showAPI(); return false;">API</a>
                     <button onclick="showLogin()" class="text-left text-blue-400 font-medium">Login</button>
                     <button onclick="showRegister()" class="text-left px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg font-medium w-fit">Get Started</button>
@@ -172,16 +174,34 @@
                     </div>
                 </section>
 
-                <!-- Latest Packages Section -->
-                <section class="py-24 bg-gray-900">
+                <!-- Timeline Section -->
+                <section id="timeline-section" class="py-24 bg-gray-900 hidden">
+                    <div class="container mx-auto px-6">
+                        <div class="text-center mb-16">
+                            <h2 id="timeline-title" class="text-4xl font-bold text-gray-100 mb-6">Timeline</h2>
+                            <p id="timeline-subtitle" class="text-xl text-gray-300">Latest activity</p>
+                        </div>
+
+                        <div id="timeline-events"
+                             class="max-w-4xl mx-auto space-y-4">
+                            <!-- Loading state -->
+                            <div class="flex justify-center py-12">
+                                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Latest Packages Section (for logged-out users) -->
+                <section id="latest-packages-section" class="py-24 bg-gray-900 hidden">
                     <div class="container mx-auto px-6">
                         <div class="text-center mb-16">
                             <h2 class="text-4xl font-bold text-gray-100 mb-6">Recently Added Packages</h2>
                             <p class="text-xl text-gray-300">Discover the latest additions to our database</p>
                         </div>
 
-                        <div id="latest-packages" 
-                             hx-get="/api/packages?limit=6" 
+                        <div id="latest-packages"
+                             hx-get="/api/packages?limit=6"
                              hx-trigger="load"
                              hx-swap="innerHTML"
                              class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -356,6 +376,27 @@
                         <div class="flex justify-center py-12">
                             <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Subscriptions Page -->
+            <div id="subscriptions-page" class="hidden min-h-screen bg-gray-900 py-12">
+                <div class="container mx-auto px-6">
+                    <div class="text-center mb-12">
+                        <h1 class="text-4xl md:text-5xl font-bold text-gray-100 mb-6">My Subscriptions</h1>
+                        <p class="text-xl text-gray-300 max-w-3xl mx-auto">Manage packages you're following to receive updates</p>
+                    </div>
+
+                    <div class="max-w-4xl mx-auto">
+                        <div id="subscriptions-list" class="space-y-4">
+                            <!-- Loading state -->
+                            <div class="flex justify-center py-12">
+                                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                            </div>
+                        </div>
+
+                        <!-- Empty state will be injected by JavaScript -->
                     </div>
                 </div>
             </div>

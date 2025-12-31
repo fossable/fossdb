@@ -132,7 +132,7 @@ pub async fn get_analytics(
     };
 
     // Trending packages - just get most recent packages for now
-    let mut trending_packages: Vec<TrendingPackage> = packages
+    let trending_packages: Vec<TrendingPackage> = packages
         .iter()
         .rev()
         .take(3)

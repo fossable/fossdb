@@ -5,11 +5,13 @@ use std::sync::Arc;
 
 /// A wrapper around reqwest::Client that applies rate limiting to all requests.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct RateLimitedClient {
     client: Client,
     limiter: Arc<RateLimiter<governor::state::direct::NotKeyed, governor::state::InMemoryState, governor::clock::DefaultClock>>,
 }
 
+#[allow(dead_code)]
 impl RateLimitedClient {
     /// Create a new rate-limited client.
     ///
@@ -143,11 +145,13 @@ impl AdaptiveRateLimitedClient {
     /// Create an adaptive client with default configuration.
     ///
     /// Starts at 10 req/s and adjusts between 1-100 req/s.
+    #[allow(dead_code)]
     pub fn with_defaults(client: Client) -> Self {
         Self::new(client, AdaptiveConfig::default())
     }
 
     /// Get a reference to the underlying client.
+    #[allow(dead_code)]
     pub fn client(&self) -> &Client {
         &self.client
     }
@@ -164,6 +168,7 @@ impl AdaptiveRateLimitedClient {
     }
 
     /// Execute a POST request with adaptive rate limiting.
+    #[allow(dead_code)]
     pub async fn post(&self, url: &str) -> Result<Response, reqwest::Error> {
         {
             let limiter = self.limiter.read().await;
@@ -178,6 +183,7 @@ impl AdaptiveRateLimitedClient {
     ///
     /// Use this when you need to configure the request before sending.
     /// Don't forget to call `report_response` after receiving the response.
+    #[allow(dead_code)]
     pub async fn get_builder(&self, url: &str) -> RequestBuilder {
         {
             let limiter = self.limiter.read().await;
@@ -187,6 +193,7 @@ impl AdaptiveRateLimitedClient {
     }
 
     /// Create a POST RequestBuilder (requires manual response reporting).
+    #[allow(dead_code)]
     pub async fn post_builder(&self, url: &str) -> RequestBuilder {
         {
             let limiter = self.limiter.read().await;
@@ -198,6 +205,7 @@ impl AdaptiveRateLimitedClient {
     /// Report a response to the adaptive rate limiter.
     ///
     /// Use this after manually sending a request created with `*_builder` methods.
+    #[allow(dead_code)]
     pub async fn report_response(&self, response: &Response) {
         self.report_result(response.status().as_u16()).await;
     }

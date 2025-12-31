@@ -26,11 +26,13 @@ struct LibrariesIoProject {
     language: Option<String>,
     status: Option<String>,
     dependents_count: Option<u32>,
+    #[allow(dead_code)]
     dependent_repositories_count: Option<u32>,
     rank: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct LibrariesIoVersion {
     number: String,
     published_at: Option<DateTime<Utc>>,
@@ -39,6 +41,7 @@ struct LibrariesIoVersion {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct LibrariesIoDependency {
     project_name: String,
     name: String,
@@ -51,6 +54,7 @@ struct LibrariesIoDependency {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct LibrariesIoPlatform {
     name: String,
     project_count: u32,
@@ -197,7 +201,7 @@ impl Scraper for LibrariesIoScraper {
         "libraries.io"
     }
 
-    async fn scrape(&self, db: Arc<crate::db::Database>) -> Result<()> {
+    async fn scrape(&self, db: Arc<crate::db::Database>, broadcaster: Arc<crate::websocket::TimelineBroadcaster>) -> Result<()> {
         use crate::models::{Package, PackageVersion, TimelineEvent, EventType};
         use std::collections::HashSet;
 
@@ -259,7 +263,7 @@ impl Scraper for LibrariesIoScraper {
                                                 created_at: now,
                                             };
 
-                                            if let Ok(_) = db.insert_version(version) {
+                                            if db.insert_version(version).is_ok() {
                                                 tracing::info!("Saved new version {} for {}", version_data.version, package_data.name);
 
                                                 // Create timeline events for subscribed users
@@ -277,8 +281,11 @@ impl Scraper for LibrariesIoScraper {
                                                             notified_at: None,
                                                         };
 
-                                                        if let Err(e) = db.insert_timeline_event(event) {
-                                                            tracing::error!("Failed to create timeline event for user {}: {}", user_id, e);
+                                                        if let Ok(saved_event) = db.insert_timeline_event(event) {
+                                                            // Broadcast the event to connected WebSocket clients
+                                                            broadcaster.broadcast(saved_event);
+                                                        } else {
+                                                            tracing::error!("Failed to create timeline event for user {}", user_id);
                                                         }
                                                     }
                                                 }
@@ -296,7 +303,10 @@ impl Scraper for LibrariesIoScraper {
                                                     notified_at: None,
                                                 };
 
-                                                let _ = db.insert_timeline_event(global_event);
+                                                if let Ok(saved_event) = db.insert_timeline_event(global_event) {
+                                                    // Broadcast the global event to connected WebSocket clients
+                                                    broadcaster.broadcast(saved_event);
+                                                }
                                             }
                                         }
                                     }

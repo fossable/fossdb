@@ -28,7 +28,7 @@ impl Scraper for CratesIoScraper {
         "crates.io"
     }
 
-    async fn scrape(&self, db: Arc<crate::db::Database>) -> Result<()> {
+    async fn scrape(&self, db: Arc<crate::db::Database>, broadcaster: Arc<crate::websocket::TimelineBroadcaster>) -> Result<()> {
         use chrono::Utc;
         use crate::models::{Package, PackageVersion, TimelineEvent, EventType};
         use std::collections::HashSet;
@@ -46,15 +46,33 @@ impl Scraper for CratesIoScraper {
 
             tracing::info!("Fetched {} crates from page {}", crates_page.crates.len(), page);
 
-            // For each crate, fetch full details including versions
+            // For each crate, check if we need to update it
             for krate in &crates_page.crates {
                 let crate_name = krate.name.clone();
 
                 // Check if package already exists
                 match db.get_package_by_name(&crate_name) {
                     Ok(Some(existing_package)) => {
-                        // Package exists - check for new versions
-                        tracing::debug!("Package {} exists, checking for new versions", crate_name);
+                        // Package exists - check if it has been updated since we last scraped
+                        // Use the updated_at field from the search result to avoid unnecessary API calls
+                        if krate.updated_at <= existing_package.updated_at {
+                            // Package hasn't been updated since we last scraped it, skip
+                            tracing::debug!(
+                                "Package {} hasn't been updated (crates.io: {}, local: {}), skipping",
+                                crate_name,
+                                krate.updated_at,
+                                existing_package.updated_at
+                            );
+                            continue;
+                        }
+
+                        // Package has been updated - fetch full details to check for new versions
+                        tracing::info!(
+                            "Package {} has been updated (crates.io: {}, local: {}), fetching details",
+                            crate_name,
+                            krate.updated_at,
+                            existing_package.updated_at
+                        );
 
                         match self.client.full_crate(&crate_name, false).await {
                             Ok(full_crate) => {
@@ -107,8 +125,11 @@ impl Scraper for CratesIoScraper {
                                                         notified_at: None,
                                                     };
 
-                                                    if let Err(e) = db.insert_timeline_event(event) {
-                                                        tracing::error!("Failed to create timeline event for user {}: {}", user_id, e);
+                                                    if let Ok(saved_event) = db.insert_timeline_event(event) {
+                                                        // Broadcast the event to connected WebSocket clients
+                                                        broadcaster.broadcast(saved_event);
+                                                    } else {
+                                                        tracing::error!("Failed to create timeline event for user {}", user_id);
                                                     }
                                                 }
                                             }
@@ -126,9 +147,19 @@ impl Scraper for CratesIoScraper {
                                                 notified_at: None,
                                             };
 
-                                            let _ = db.insert_timeline_event(global_event);
+                                            if let Ok(saved_event) = db.insert_timeline_event(global_event) {
+                                                // Broadcast the global event to connected WebSocket clients
+                                                broadcaster.broadcast(saved_event);
+                                            }
                                         }
                                     }
+                                }
+
+                                // Update the package's updated_at timestamp
+                                let mut updated_package = existing_package.clone();
+                                updated_package.updated_at = krate.updated_at;
+                                if let Err(e) = db.update_package(updated_package) {
+                                    tracing::error!("Failed to update package {} timestamp: {}", crate_name, e);
                                 }
                             }
                             Err(e) => {
@@ -139,12 +170,13 @@ impl Scraper for CratesIoScraper {
                     }
                     Ok(None) => {
                         // Package doesn't exist, fetch and save it
+                        tracing::info!("New package discovered: {}", crate_name);
                         let crate_name_for_log = crate_name.clone();
                         match self.client.full_crate(&crate_name, false).await {
                             Ok(full_crate) => {
                                 let now = Utc::now();
 
-                                // Create and save the package
+                                // Create and save the package using data from both search result and full details
                                 let package = Package {
                                     id: 0, // Will be auto-generated
                                     name: full_crate.name.clone(),
@@ -155,7 +187,7 @@ impl Scraper for CratesIoScraper {
                                     maintainers: Vec::new(), // crates_io_api doesn't expose maintainers easily
                                     tags: vec!["rust".to_string(), "crate".to_string()],
                                     created_at: now,
-                                    updated_at: now,
+                                    updated_at: krate.updated_at, // Use timestamp from search result
                                     submitted_by: Some("scraper".to_string()),
                                     platform: Some("crates.io".to_string()),
                                     language: Some("rust".to_string()),
@@ -167,6 +199,24 @@ impl Scraper for CratesIoScraper {
                                 match db.insert_package(package) {
                                     Ok(saved_package) => {
                                         tracing::info!("Saved package: {}", saved_package.name);
+
+                                        // Create global timeline event for new package
+                                        let global_event = TimelineEvent {
+                                            id: 0,
+                                            package_id: saved_package.id,
+                                            user_id: None, // Global event
+                                            event_type: EventType::PackageAdded,
+                                            package_name: saved_package.name.clone(),
+                                            version: None,
+                                            description: format!("New package {} added to FossDB", saved_package.name),
+                                            created_at: now,
+                                            notified_at: None,
+                                        };
+
+                                        if let Ok(saved_event) = db.insert_timeline_event(global_event) {
+                                            // Broadcast the global event to connected WebSocket clients
+                                            broadcaster.broadcast(saved_event);
+                                        }
 
                                         // Save versions (up to 10 non-yanked versions)
                                         for v in full_crate.versions.iter()

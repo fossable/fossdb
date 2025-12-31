@@ -4,6 +4,7 @@ use std::env;
 pub struct Config {
     pub database_path: String,
     pub jwt_secret: String,
+    #[allow(dead_code)]
     pub server_port: u16,
     pub libraries_io_api_key: Option<String>,
     pub scraper_interval_hours: u64,

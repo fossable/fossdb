@@ -2,8 +2,15 @@
 let currentUser = null;
 let authToken = null;
 let currentViewMode = 'grid';
-let favoritesCache = new Set();
+let subscriptionsCache = new Set();
 let comparisonList = [];
+let timelineWebSocket = null;
+let timelineOffset = 0;
+let timelineLimit = 20;
+let timelineTotal = 0;
+let timelineLoading = false;
+let displayedEventIds = new Set();
+let timelineUpdateInterval = null;
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
@@ -33,25 +40,36 @@ document.addEventListener('DOMContentLoaded', function() {
 function checkAuthStatus() {
     const token = localStorage.getItem('auth_token');
     const userData = localStorage.getItem('user_data');
-    
+
     if (token && userData) {
         authToken = token;
         currentUser = JSON.parse(userData);
         updateAuthUI();
+        loadSubscriptionsCache(); // Load user's subscriptions
     }
 }
 
 function updateAuthUI() {
     const authButtons = document.getElementById('auth-buttons');
     const userMenu = document.getElementById('user-menu');
-    
+    const subscriptionsNav = document.getElementById('nav-subscriptions');
+    const mobileSubscriptionsNav = document.getElementById('mobile-nav-subscriptions');
+
     if (currentUser) {
         authButtons.classList.add('hidden');
         userMenu.classList.remove('hidden');
         document.getElementById('username').textContent = currentUser.username;
+
+        // Show subscriptions link when logged in
+        if (subscriptionsNav) subscriptionsNav.classList.remove('hidden');
+        if (mobileSubscriptionsNav) mobileSubscriptionsNav.classList.remove('hidden');
     } else {
         authButtons.classList.remove('hidden');
         userMenu.classList.add('hidden');
+
+        // Hide subscriptions link when logged out
+        if (subscriptionsNav) subscriptionsNav.classList.add('hidden');
+        if (mobileSubscriptionsNav) mobileSubscriptionsNav.classList.add('hidden');
     }
 }
 
@@ -77,11 +95,38 @@ window.showHome = function() {
     if (homePage) {
         homePage.classList.remove('hidden');
     }
+
+    // Show timeline for logged-in users, latest packages for logged-out users
+    const timelineSection = document.getElementById('timeline-section');
+    const latestPackagesSection = document.getElementById('latest-packages-section');
+
+    if (currentUser && authToken) {
+        // User is logged in - show personal timeline
+        if (timelineSection) {
+            timelineSection.classList.remove('hidden');
+        }
+        if (latestPackagesSection) {
+            latestPackagesSection.classList.add('hidden');
+        }
+        loadTimeline();
+    } else {
+        // User is logged out - show global timeline
+        if (timelineSection) {
+            timelineSection.classList.remove('hidden');
+        }
+        if (latestPackagesSection) {
+            latestPackagesSection.classList.add('hidden');
+        }
+        loadTimeline(); // Load global timeline for logged-out users
+    }
+
     updateActiveNav('home');
     window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
 window.showPackages = function() {
+    disconnectTimelineWebSocket(); // Disconnect websocket when leaving timeline
+    stopTimelineUpdates(); // Stop timestamp updates when leaving timeline
     hideAllPages();
     const packagesPage = document.getElementById('packages-page');
     if (packagesPage) {
@@ -93,7 +138,28 @@ window.showPackages = function() {
 
 // Analytics page removed - use /api/analytics endpoint for data
 
+window.showSubscriptions = function() {
+    if (!currentUser || !authToken) {
+        showNotification('Please log in to view subscriptions', 'warning');
+        showLogin();
+        return;
+    }
+
+    disconnectTimelineWebSocket(); // Disconnect websocket when leaving timeline
+    stopTimelineUpdates(); // Stop timestamp updates when leaving timeline
+    hideAllPages();
+    const subscriptionsPage = document.getElementById('subscriptions-page');
+    if (subscriptionsPage) {
+        subscriptionsPage.classList.remove('hidden');
+    }
+    updateActiveNav('subscriptions');
+    loadSubscriptions();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
 window.showAPI = function() {
+    disconnectTimelineWebSocket(); // Disconnect websocket when leaving timeline
+    stopTimelineUpdates(); // Stop timestamp updates when leaving timeline
     hideAllPages();
     const apiPage = document.getElementById('api-page');
     if (apiPage) {
@@ -106,10 +172,12 @@ window.showAPI = function() {
 function hideAllPages() {
     const homePage = document.getElementById('home-page');
     const packagesPage = document.getElementById('packages-page');
+    const subscriptionsPage = document.getElementById('subscriptions-page');
     const apiPage = document.getElementById('api-page');
 
     if (homePage) homePage.classList.add('hidden');
     if (packagesPage) packagesPage.classList.add('hidden');
+    if (subscriptionsPage) subscriptionsPage.classList.add('hidden');
     if (apiPage) apiPage.classList.add('hidden');
 }
 
@@ -197,11 +265,13 @@ window.hideModal = function() {
 window.logout = function() {
     authToken = null;
     currentUser = null;
+    subscriptionsCache.clear();
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user_data');
+    localStorage.removeItem('subscriptions');
     updateAuthUI();
     showHome();
-    
+
     // Show success message
     showNotification('Logged out successfully', 'success');
 };
@@ -542,15 +612,16 @@ function setupHTMXHandlers() {
                         setTimeout(() => {
                             authToken = data.token;
                             currentUser = { username: data.user_id || 'User' };
-                            
+
                             localStorage.setItem('auth_token', authToken);
                             localStorage.setItem('user_data', JSON.stringify(currentUser));
-                            
+
                             updateAuthUI();
+                            loadSubscriptionsCache(); // Load user's subscriptions
                             hideLogin();
                             hideRegister();
                             showHome();
-                            
+
                             const action = isRegister ? 'registered' : 'logged in';
                             showNotification(`Successfully ${action}!`, 'success');
                         }, 800);
@@ -638,29 +709,19 @@ function renderPackages(packages, target) {
 function renderPackagesGrid(packages, target) {
     const html = packages.map(pkg => `
         <div class="bg-gray-800 rounded-2xl shadow-lg p-6 card-hover border border-gray-700 relative" data-package-id="${pkg.id}">
-            <!-- Package Actions -->
-            <div class="absolute top-4 right-4 flex space-x-2">
-                <button onclick="toggleFavorite('${pkg.id}')" class="p-2 rounded-lg hover:bg-gray-100 transition-colors favorite-btn" data-package-id="${pkg.id}">
-                    <svg class="w-4 h-4 ${favoritesCache.has(pkg.id) ? 'text-red-500 fill-current' : 'text-gray-400'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path>
-                    </svg>
-                </button>
-                <button onclick="addToComparison('${pkg.id}')" class="p-2 rounded-lg hover:bg-gray-100 transition-colors" title="Add to comparison">
+            <!-- Comparison button in top-right -->
+            <div class="absolute top-4 right-4">
+                <button onclick="addToComparison('${pkg.id}')" class="p-2 rounded-lg hover:bg-gray-700 transition-colors" title="Add to comparison">
                     <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
                     </svg>
                 </button>
             </div>
-            
-            <div class="flex justify-between items-start mb-4">
-                <div class="flex-1 pr-12">
+
+            <div class="mb-4">
+                <div class="pr-12">
                     <h3 class="text-xl font-bold text-gray-100 mb-2 hover:text-blue-400 transition-colors cursor-pointer" onclick="showPackageDetails('${pkg.id}')">${pkg.name}</h3>
-                    <p class="text-gray-600 leading-relaxed">${pkg.description || 'No description available'}</p>
-                </div>
-                <div class="text-right">
-                    <div class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                        ${new Date(pkg.created_at).toLocaleDateString()}
-                    </div>
+                    <p class="text-gray-400 leading-relaxed">${pkg.description || 'No description available'}</p>
                 </div>
             </div>
             
@@ -674,24 +735,27 @@ function renderPackagesGrid(packages, target) {
                 </div>
             ` : ''}
             
-            <div class="flex justify-between items-center pt-4 border-t border-gray-100">
-                <div class="text-sm text-gray-600">
+            <div class="flex justify-between items-center pt-4 border-t border-gray-700">
+                <div class="flex items-center space-x-3">
                     ${pkg.license ? `
-                        <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-medium">
+                        <span class="bg-green-500/10 text-green-400 px-2 py-1 rounded text-xs font-medium border border-green-500/20">
                             ${pkg.license}
                         </span>
-                    ` : '<span class="text-gray-400">No license</span>'}
+                    ` : '<span class="text-gray-400 text-xs">No license</span>'}
+                    <span class="text-xs text-gray-500">
+                        ${new Date(pkg.created_at).toLocaleDateString()}
+                    </span>
                 </div>
                 <div class="flex space-x-3">
                     ${pkg.homepage ? `
-                        <a href="${pkg.homepage}" target="_blank" class="text-blue-600 hover:text-blue-800 transition-colors" title="Homepage">
+                        <a href="${pkg.homepage}" target="_blank" class="text-blue-400 hover:text-blue-300 transition-colors" title="Homepage">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
                             </svg>
                         </a>
                     ` : ''}
                     ${pkg.repository ? `
-                        <a href="${pkg.repository}" target="_blank" class="text-gray-600 hover:text-gray-800 transition-colors" title="Repository">
+                        <a href="${pkg.repository}" target="_blank" class="text-gray-400 hover:text-gray-300 transition-colors" title="Repository">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
                             </svg>
@@ -708,24 +772,21 @@ function renderPackagesGrid(packages, target) {
 
 function renderPackagesList(packages, target) {
     const html = packages.map(pkg => `
-        <div class="bg-gray-800 rounded-xl shadow-lg p-6 card-hover border border-gray-700 flex items-center space-x-6" data-package-id="${pkg.id}">
-            <div class="flex-1">
-                <div class="flex items-start justify-between mb-2">
-                    <h3 class="text-xl font-bold text-gray-800 hover:text-blue-600 transition-colors cursor-pointer" onclick="showPackageDetails('${pkg.id}')">${pkg.name}</h3>
-                    <div class="flex space-x-2">
-                        <button onclick="toggleFavorite('${pkg.id}')" class="p-1 rounded hover:bg-gray-100 transition-colors favorite-btn" data-package-id="${pkg.id}">
-                            <svg class="w-4 h-4 ${favoritesCache.has(pkg.id) ? 'text-red-500 fill-current' : 'text-gray-400'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path>
-                            </svg>
-                        </button>
-                        <button onclick="addToComparison('${pkg.id}')" class="p-1 rounded hover:bg-gray-100 transition-colors" title="Add to comparison">
-                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                            </svg>
-                        </button>
-                    </div>
+        <div class="bg-gray-800 rounded-xl shadow-lg p-6 card-hover border border-gray-700 relative" data-package-id="${pkg.id}">
+            <!-- Comparison button in top-right -->
+            <div class="absolute top-4 right-4">
+                <button onclick="addToComparison('${pkg.id}')" class="p-2 rounded-lg hover:bg-gray-700 transition-colors" title="Add to comparison">
+                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="flex-1 pr-12">
+                <div class="mb-2">
+                    <h3 class="text-xl font-bold text-gray-100 hover:text-blue-400 transition-colors cursor-pointer" onclick="showPackageDetails('${pkg.id}')">${pkg.name}</h3>
                 </div>
-                <p class="text-gray-600 mb-3">${pkg.description || 'No description available'}</p>
+                <p class="text-gray-400 mb-3">${pkg.description || 'No description available'}</p>
                 
                 ${pkg.tags && pkg.tags.length > 0 ? `
                     <div class="flex flex-wrap gap-2 mb-3">
@@ -899,37 +960,108 @@ function filterByTag(tag) {
     }
 }
 
-// Favorites functionality
-function toggleFavorite(packageId) {
-    if (favoritesCache.has(packageId)) {
-        favoritesCache.delete(packageId);
-        showNotification('Removed from favorites', 'info');
-    } else {
-        favoritesCache.add(packageId);
-        showNotification('Added to favorites', 'success');
+// Subscription toggle functionality
+async function toggleSubscription(packageName) {
+    if (!currentUser || !authToken) {
+        showNotification('Please log in to subscribe to packages', 'warning');
+        showLogin();
+        return;
     }
-    
-    // Update UI
-    updateFavoriteButtons(packageId);
-    
-    // Save to localStorage
-    localStorage.setItem('favorites', JSON.stringify([...favoritesCache]));
+
+    if (subscriptionsCache.has(packageName)) {
+        // Unsubscribe
+        try {
+            const response = await fetch(`/api/users/subscriptions/${encodeURIComponent(packageName)}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${authToken}`
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to unsubscribe');
+            }
+
+            subscriptionsCache.delete(packageName);
+            showNotification(`Unsubscribed from ${packageName}`, 'info');
+            updateSubscriptionButtons(packageName);
+            saveSubscriptionsToCache();
+        } catch (error) {
+            showNotification('Failed to unsubscribe. Please try again.', 'error');
+        }
+    } else {
+        // Subscribe
+        try {
+            const response = await fetch('/api/users/subscriptions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${authToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ package_name: packageName })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to subscribe');
+            }
+
+            subscriptionsCache.add(packageName);
+            showNotification(`Subscribed to ${packageName}`, 'success');
+            updateSubscriptionButtons(packageName);
+            saveSubscriptionsToCache();
+        } catch (error) {
+            showNotification('Failed to subscribe. Please try again.', 'error');
+        }
+    }
 }
 
-function updateFavoriteButtons(packageId) {
-    const buttons = document.querySelectorAll(`[data-package-id="${packageId}"]`);
+function updateSubscriptionButtons(packageName) {
+    const buttons = document.querySelectorAll(`[data-package-name="${packageName}"]`);
     buttons.forEach(button => {
         const svg = button.querySelector('svg');
         if (svg) {
-            if (favoritesCache.has(packageId)) {
+            if (subscriptionsCache.has(packageName)) {
                 svg.classList.add('text-red-500', 'fill-current');
                 svg.classList.remove('text-gray-400');
+                button.setAttribute('title', 'Unsubscribe');
             } else {
                 svg.classList.remove('text-red-500', 'fill-current');
                 svg.classList.add('text-gray-400');
+                button.setAttribute('title', 'Subscribe');
             }
         }
     });
+}
+
+function saveSubscriptionsToCache() {
+    localStorage.setItem('subscriptions', JSON.stringify([...subscriptionsCache]));
+}
+
+async function loadSubscriptionsCache() {
+    if (!currentUser || !authToken) {
+        subscriptionsCache.clear();
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/users/subscriptions', {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            subscriptionsCache = new Set(data.subscriptions || []);
+            saveSubscriptionsToCache();
+        }
+    } catch (error) {
+        // Fallback to localStorage
+        const savedSubscriptions = localStorage.getItem('subscriptions');
+        if (savedSubscriptions) {
+            subscriptionsCache = new Set(JSON.parse(savedSubscriptions));
+        }
+    }
 }
 
 // Package comparison functionality
@@ -1149,6 +1281,19 @@ async function showPackageDetails(packageId) {
                 </div>
 
                 <div class="flex gap-4">
+                    ${currentUser && authToken ? (
+                        subscriptionsCache.has(pkg.name) ? `
+                            <button onclick="unsubscribeFromPackage('${pkg.name}'); hideModal();"
+                                    class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
+                                Unsubscribe
+                            </button>
+                        ` : `
+                            <button onclick="subscribeToPackage('${pkg.name}'); hideModal();"
+                                    class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                                Subscribe
+                            </button>
+                        `
+                    ) : ''}
                     ${pkg.homepage ? `
                         <a href="${pkg.homepage}" target="_blank"
                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
@@ -1166,7 +1311,6 @@ async function showPackageDetails(packageId) {
                 <div class="text-xs text-gray-500 pt-4 border-t border-gray-200">
                     Created: ${new Date(pkg.created_at).toLocaleDateString()} |
                     Updated: ${new Date(pkg.updated_at).toLocaleDateString()}
-                    ${pkg.submitted_by ? ` | Submitted by: ${pkg.submitted_by}` : ''}
                 </div>
             </div>
         `;
@@ -1179,18 +1323,709 @@ async function showPackageDetails(packageId) {
 
 // Analytics functionality removed - use /api/analytics endpoint directly
 
+// Subscriptions functionality
+async function loadSubscriptions() {
+    const subscriptionsContainer = document.getElementById('subscriptions-list');
+    if (!subscriptionsContainer) return;
+
+    // Show loading state
+    subscriptionsContainer.innerHTML = `
+        <div class="flex justify-center py-12">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        </div>
+    `;
+
+    try {
+        const headers = {
+            'Authorization': `Bearer ${authToken}`
+        };
+
+        const response = await fetch('/api/users/subscriptions', { headers });
+
+        if (!response.ok) {
+            throw new Error('Failed to load subscriptions');
+        }
+
+        const data = await response.json();
+        await renderSubscriptions(data.subscriptions || [], subscriptionsContainer);
+    } catch (error) {
+        subscriptionsContainer.innerHTML = `
+            <div class="text-center py-12">
+                <div class="text-red-400 mb-4">
+                    <svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <p class="text-lg font-medium">Error loading subscriptions</p>
+                    <p class="text-sm text-gray-400 mt-2">Please try refreshing the page</p>
+                </div>
+            </div>
+        `;
+    }
+}
+
+async function renderSubscriptions(subscriptions, container) {
+    if (subscriptions.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-12">
+                <div class="text-gray-400 mb-4">
+                    <svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-4.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 009.586 13H7"></path>
+                    </svg>
+                    <p class="text-lg font-medium text-gray-300">No subscriptions yet</p>
+                    <p class="text-sm text-gray-400 mt-2">Browse packages and subscribe to get updates</p>
+                    <button onclick="showPackages()" class="mt-6 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                        Browse Packages
+                    </button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    // Fetch package details for each subscription
+    const packagePromises = subscriptions.map(async (packageName) => {
+        try {
+            const response = await fetch(`/api/packages?search=${encodeURIComponent(packageName)}`);
+            if (!response.ok) return null;
+
+            const data = await response.json();
+            const pkg = data.packages?.find(p => p.name === packageName);
+            return pkg || { name: packageName, description: 'Package details unavailable' };
+        } catch (error) {
+            return { name: packageName, description: 'Error loading package' };
+        }
+    });
+
+    const packages = await Promise.all(packagePromises);
+
+    const html = packages.filter(pkg => pkg !== null).map(pkg => `
+        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-colors">
+            <div class="flex items-start justify-between">
+                <div class="flex-1 min-w-0">
+                    <h3 class="text-xl font-bold text-gray-100 mb-2 hover:text-blue-400 transition-colors cursor-pointer" onclick="showPackageDetails('${pkg.id || ''}')">${pkg.name}</h3>
+                    <p class="text-gray-400 text-sm mb-4">${pkg.description || 'No description available'}</p>
+
+                    <div class="flex flex-wrap gap-3 items-center">
+                        ${pkg.license ? `
+                            <span class="bg-green-500/10 text-green-400 px-3 py-1 rounded-full text-xs font-medium border border-green-500/20">
+                                ${pkg.license}
+                            </span>
+                        ` : ''}
+                        ${pkg.language ? `
+                            <span class="bg-blue-500/10 text-blue-400 px-3 py-1 rounded-full text-xs font-medium border border-blue-500/20">
+                                ${pkg.language}
+                            </span>
+                        ` : ''}
+                        ${pkg.created_at ? `
+                            <span class="text-xs text-gray-500">
+                                Added ${new Date(pkg.created_at).toLocaleDateString()}
+                            </span>
+                        ` : ''}
+                    </div>
+                </div>
+
+                <div class="ml-4 flex flex-col space-y-2">
+                    <button onclick="unsubscribeFromPackage('${pkg.name}')" class="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors text-sm font-medium">
+                        Unsubscribe
+                    </button>
+                    ${pkg.repository ? `
+                        <a href="${pkg.repository}" target="_blank" class="px-4 py-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors text-sm font-medium text-center">
+                            Repository
+                        </a>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    container.innerHTML = html;
+}
+
+async function subscribeToPackage(packageName) {
+    if (!currentUser || !authToken) {
+        showNotification('Please log in to subscribe to packages', 'warning');
+        showLogin();
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/users/subscriptions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ package_name: packageName })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to subscribe');
+        }
+
+        subscriptionsCache.add(packageName);
+        updateSubscriptionButtons(packageName);
+        saveSubscriptionsToCache();
+        showNotification(`Subscribed to ${packageName}`, 'success');
+    } catch (error) {
+        showNotification('Failed to subscribe. Please try again.', 'error');
+    }
+}
+
+async function unsubscribeFromPackage(packageName) {
+    if (!confirm(`Are you sure you want to unsubscribe from ${packageName}?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users/subscriptions/${encodeURIComponent(packageName)}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to unsubscribe');
+        }
+
+        subscriptionsCache.delete(packageName);
+        updateSubscriptionButtons(packageName);
+        saveSubscriptionsToCache();
+        showNotification(`Unsubscribed from ${packageName}`, 'success');
+
+        // Reload subscriptions page if we're on it
+        const subscriptionsPage = document.getElementById('subscriptions-page');
+        if (subscriptionsPage && !subscriptionsPage.classList.contains('hidden')) {
+            loadSubscriptions();
+        }
+    } catch (error) {
+        showNotification('Failed to unsubscribe. Please try again.', 'error');
+    }
+}
+
+// WebSocket functionality for real-time timeline updates
+function connectTimelineWebSocket() {
+    // Close existing connection if any
+    if (timelineWebSocket) {
+        timelineWebSocket.close();
+        timelineWebSocket = null;
+    }
+
+    // Determine WebSocket URL
+    // If running on localhost and frontend is on a different port, connect to backend port
+    let wsUrl;
+    if (window.location.hostname === 'localhost') {
+        // Assume backend is on port 3000
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${protocol}//localhost:3000/ws/timeline`;
+    } else {
+        // Production: use same host as current page
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${protocol}//${window.location.host}/ws/timeline`;
+    }
+
+    console.log('Connecting to WebSocket:', wsUrl);
+    timelineWebSocket = new WebSocket(wsUrl);
+
+    timelineWebSocket.onopen = () => {
+        console.log('Timeline WebSocket connected');
+
+        // Send authentication if user is logged in
+        if (authToken) {
+            timelineWebSocket.send(JSON.stringify({
+                type: 'Authenticate',
+                token: authToken
+            }));
+        }
+    };
+
+    timelineWebSocket.onmessage = (event) => {
+        try {
+            const message = JSON.parse(event.data);
+
+            switch (message.type) {
+                case 'Authenticated':
+                    console.log('Timeline WebSocket authenticated for user:', message.user_id);
+                    break;
+
+                case 'TimelineEvent':
+                    // Add new event to timeline
+                    addTimelineEventToUI(message.event);
+                    break;
+
+                case 'Ping':
+                    // Respond to server ping
+                    timelineWebSocket.send(JSON.stringify({ type: 'Pong' }));
+                    break;
+
+                case 'Pong':
+                    // Server acknowledged our ping
+                    break;
+            }
+        } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
+        }
+    };
+
+    timelineWebSocket.onerror = (error) => {
+        console.error('Timeline WebSocket error:', error);
+    };
+
+    timelineWebSocket.onclose = () => {
+        console.log('Timeline WebSocket disconnected');
+        timelineWebSocket = null;
+
+        // Attempt to reconnect after 5 seconds if on timeline page
+        const timelineSection = document.getElementById('timeline-section');
+        if (timelineSection && !timelineSection.classList.contains('hidden')) {
+            setTimeout(() => {
+                console.log('Attempting to reconnect Timeline WebSocket...');
+                connectTimelineWebSocket();
+            }, 5000);
+        }
+    };
+}
+
+function disconnectTimelineWebSocket() {
+    if (timelineWebSocket) {
+        timelineWebSocket.close();
+        timelineWebSocket = null;
+    }
+}
+
+function addTimelineEventToUI(event) {
+    const timelineContainer = document.getElementById('timeline-events');
+    if (!timelineContainer) return;
+
+    // Check if we've already displayed this event (by ID or by unique key)
+    if (event.id && displayedEventIds.has(event.id)) {
+        console.log('Skipping duplicate event:', event.id);
+        return; // Skip duplicate
+    }
+
+    // Also check by a composite key (package_name + event_type + created_at)
+    const eventKey = `${event.package_name}_${event.event_type}_${event.created_at}`;
+    if (displayedEventIds.has(eventKey)) {
+        console.log('Skipping duplicate event by key:', eventKey);
+        return;
+    }
+
+    // Check if this is the empty state
+    if (timelineContainer.querySelector('svg') && (
+        timelineContainer.textContent.includes('Your timeline is empty') ||
+        timelineContainer.textContent.includes('No activity yet') ||
+        timelineContainer.textContent.includes('Waiting for activity')
+    )) {
+        // Replace empty state with the new event
+        timelineContainer.innerHTML = '';
+    }
+
+    const eventDate = new Date(event.created_at);
+    const timeAgo = getTimeAgo(eventDate);
+    const title = getEventTitle(event);
+
+    const eventHtml = `
+        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-colors animate-slideIn" data-event-id="${event.id || ''}">
+            <div class="flex items-start space-x-4">
+                <div class="flex-shrink-0">
+                    ${getEventIcon(event.event_type)}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-start justify-between">
+                        <div>
+                            <p class="text-gray-100 font-medium">${title}</p>
+                            ${event.description ? `<p class="text-gray-400 text-sm mt-1">${event.description}</p>` : ''}
+                            ${event.package_name ? `
+                                <span class="inline-block mt-2 text-blue-400 text-sm hover:text-blue-300 cursor-pointer">
+                                    ${event.package_name}
+                                </span>
+                            ` : ''}
+                        </div>
+                        <span class="text-xs text-gray-500 whitespace-nowrap ml-4 timeline-timestamp" data-timestamp="${event.created_at}">${timeAgo}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Prepend the new event to the top
+    timelineContainer.insertAdjacentHTML('afterbegin', eventHtml);
+
+    // Track this event ID for personal timeline
+    if (currentUser && authToken && event.id) {
+        displayedEventIds.add(event.id);
+    }
+
+    // For global timeline (logged-out users), keep only the 50 most recent events
+    if (!currentUser || !authToken) {
+        const events = timelineContainer.querySelectorAll('.bg-gray-800');
+        if (events.length > 50) {
+            // Remove events beyond the 50th
+            for (let i = 50; i < events.length; i++) {
+                events[i].remove();
+            }
+        }
+    }
+}
+
+// Timeline functionality
+async function loadTimeline(append = false) {
+    const timelineContainer = document.getElementById('timeline-events');
+    if (!timelineContainer) return;
+
+    // Update title and subtitle based on auth state
+    const titleElement = document.getElementById('timeline-title');
+    const subtitleElement = document.getElementById('timeline-subtitle');
+    if (currentUser && authToken) {
+        if (titleElement) titleElement.textContent = 'Your Timeline';
+        if (subtitleElement) subtitleElement.textContent = 'Activity from packages you\'re following';
+    } else {
+        if (titleElement) titleElement.textContent = 'Global Timeline';
+        if (subtitleElement) subtitleElement.textContent = 'Latest activity across all packages';
+    }
+
+    // For global timeline (logged out), just show empty state and rely on WebSocket
+    if (!currentUser || !authToken) {
+        displayedEventIds.clear();
+        timelineContainer.innerHTML = `
+            <div class="text-center py-12">
+                <div class="text-gray-400 mb-4">
+                    <svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <p class="text-lg font-medium text-gray-300">Waiting for activity...</p>
+                    <p class="text-sm text-gray-400 mt-2">Events will appear here as they happen</p>
+                </div>
+            </div>
+        `;
+        // Connect to WebSocket for real-time updates
+        connectTimelineWebSocket();
+        // Start updating timestamps
+        startTimelineUpdates();
+        return;
+    }
+
+    // Personal timeline - load from API with pagination
+    if (timelineLoading) return;
+    timelineLoading = true;
+
+    // Reset offset if not appending
+    if (!append) {
+        timelineOffset = 0;
+        displayedEventIds.clear();
+    }
+
+    // Show loading state only if not appending
+    if (!append) {
+        timelineContainer.innerHTML = `
+            <div class="flex justify-center py-12">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+            </div>
+        `;
+    }
+
+    try {
+        const headers = {
+            'Authorization': `Bearer ${authToken}`
+        };
+
+        // Build URL with pagination params
+        const url = `/api/users/timeline?limit=${timelineLimit}&offset=${timelineOffset}`;
+
+        const response = await fetch(url, { headers });
+
+        if (!response.ok) {
+            throw new Error('Failed to load timeline');
+        }
+
+        const data = await response.json();
+
+        if (data.total !== undefined) {
+            timelineTotal = data.total;
+        }
+
+        if (append) {
+            appendTimelineEvents(data.events || [], timelineContainer);
+        } else {
+            renderTimeline(data.events || [], timelineContainer);
+        }
+
+        // Track displayed event IDs
+        (data.events || []).forEach(event => {
+            if (event.id) displayedEventIds.add(event.id);
+        });
+
+        // Update offset for next page
+        timelineOffset += (data.events || []).length;
+
+        // Connect to WebSocket for real-time updates (only once)
+        if (!append) {
+            connectTimelineWebSocket();
+            // Start updating timestamps
+            startTimelineUpdates();
+        }
+    } catch (error) {
+        if (!append) {
+            timelineContainer.innerHTML = `
+                <div class="text-center py-12">
+                    <div class="text-red-400 mb-4">
+                        <svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <p class="text-lg font-medium">Error loading timeline</p>
+                        <p class="text-sm text-gray-400 mt-2">Please try refreshing the page</p>
+                    </div>
+                </div>
+            `;
+        }
+    } finally {
+        timelineLoading = false;
+    }
+}
+
+function renderTimeline(events, container) {
+    if (events.length === 0) {
+        const emptyMessage = currentUser && authToken
+            ? {
+                title: 'Your timeline is empty',
+                subtitle: 'Subscribe to packages to see updates here'
+              }
+            : {
+                title: 'No activity yet',
+                subtitle: 'Check back later for updates'
+              };
+
+        container.innerHTML = `
+            <div class="text-center py-12">
+                <div class="text-gray-400 mb-4">
+                    <svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <p class="text-lg font-medium text-gray-300">${emptyMessage.title}</p>
+                    <p class="text-sm text-gray-400 mt-2">${emptyMessage.subtitle}</p>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    const html = events.map(event => {
+        const eventDate = new Date(event.created_at);
+        const timeAgo = getTimeAgo(eventDate);
+        const title = getEventTitle(event);
+
+        return `
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-colors">
+                <div class="flex items-start space-x-4">
+                    <div class="flex-shrink-0">
+                        ${getEventIcon(event.event_type)}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-start justify-between">
+                            <div>
+                                <p class="text-gray-100 font-medium">${title}</p>
+                                ${event.description ? `<p class="text-gray-400 text-sm mt-1">${event.description}</p>` : ''}
+                                ${event.package_name ? `
+                                    <span class="inline-block mt-2 text-blue-400 text-sm hover:text-blue-300 cursor-pointer">
+                                        ${event.package_name}
+                                    </span>
+                                ` : ''}
+                            </div>
+                            <span class="text-xs text-gray-500 whitespace-nowrap ml-4 timeline-timestamp" data-timestamp="${event.created_at}">${timeAgo}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    container.innerHTML = html;
+
+    // Add "Load More" button for personal timeline
+    if (currentUser && authToken && timelineOffset < timelineTotal) {
+        const loadMoreHtml = `
+            <div class="flex justify-center py-6">
+                <button onclick="loadTimeline(true)" class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                    Load More (${timelineTotal - timelineOffset} remaining)
+                </button>
+            </div>
+        `;
+        container.insertAdjacentHTML('beforeend', loadMoreHtml);
+    }
+}
+
+function appendTimelineEvents(events, container) {
+    if (events.length === 0) return;
+
+    // Remove existing "Load More" button if present
+    const loadMoreBtn = container.querySelector('button[onclick*="loadTimeline"]');
+    if (loadMoreBtn) {
+        loadMoreBtn.parentElement.remove();
+    }
+
+    const html = events.map(event => {
+        const eventDate = new Date(event.created_at);
+        const timeAgo = getTimeAgo(eventDate);
+        const title = getEventTitle(event);
+
+        return `
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-gray-600 transition-colors">
+                <div class="flex items-start space-x-4">
+                    <div class="flex-shrink-0">
+                        ${getEventIcon(event.event_type)}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-start justify-between">
+                            <div>
+                                <p class="text-gray-100 font-medium">${title}</p>
+                                ${event.description ? `<p class="text-gray-400 text-sm mt-1">${event.description}</p>` : ''}
+                                ${event.package_name ? `
+                                    <span class="inline-block mt-2 text-blue-400 text-sm hover:text-blue-300 cursor-pointer">
+                                        ${event.package_name}
+                                    </span>
+                                ` : ''}
+                            </div>
+                            <span class="text-xs text-gray-500 whitespace-nowrap ml-4 timeline-timestamp" data-timestamp="${event.created_at}">${timeAgo}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    container.insertAdjacentHTML('beforeend', html);
+
+    // Add new "Load More" button if there are more events
+    if (currentUser && authToken && timelineOffset < timelineTotal) {
+        const loadMoreHtml = `
+            <div class="flex justify-center py-6">
+                <button onclick="loadTimeline(true)" class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                    Load More (${timelineTotal - timelineOffset} remaining)
+                </button>
+            </div>
+        `;
+        container.insertAdjacentHTML('beforeend', loadMoreHtml);
+    }
+}
+
+function getEventTitle(event) {
+    switch(event.event_type) {
+        case 'PackageAdded':
+            return event.package_name;
+        case 'NewRelease':
+            return `${event.package_name} ${event.version || ''}`.trim();
+        case 'SecurityAlert':
+            return `Security Alert: ${event.package_name}`;
+        case 'PackageUpdated':
+            return `${event.package_name} Updated`;
+        default:
+            return event.package_name || 'Update';
+    }
+}
+
+function getEventIcon(eventType) {
+    const iconClasses = "w-10 h-10 p-2 rounded-full";
+
+    switch(eventType) {
+        case 'PackageAdded':
+            return `
+                <div class="${iconClasses} bg-green-500/10 text-green-400">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                </div>
+            `;
+        case 'NewRelease':
+            return `
+                <div class="${iconClasses} bg-blue-500/10 text-blue-400">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                    </svg>
+                </div>
+            `;
+        case 'SecurityAlert':
+            return `
+                <div class="${iconClasses} bg-red-500/10 text-red-400">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                </div>
+            `;
+        case 'PackageUpdated':
+            return `
+                <div class="${iconClasses} bg-purple-500/10 text-purple-400">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                </div>
+            `;
+        default:
+            return `
+                <div class="${iconClasses} bg-gray-500/10 text-gray-400">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                </div>
+            `;
+    }
+}
+
+function getTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+
+    const intervals = {
+        year: 31536000,
+        month: 2592000,
+        week: 604800,
+        day: 86400,
+        hour: 3600,
+        minute: 60
+    };
+
+    for (const [unit, secondsInUnit] of Object.entries(intervals)) {
+        const interval = Math.floor(seconds / secondsInUnit);
+        if (interval >= 1) {
+            return `${interval} ${unit}${interval !== 1 ? 's' : ''} ago`;
+        }
+    }
+
+    return 'just now';
+}
+
+function updateTimelineTimestamps() {
+    const timestamps = document.querySelectorAll('.timeline-timestamp');
+    timestamps.forEach(span => {
+        const timestamp = span.getAttribute('data-timestamp');
+        if (timestamp) {
+            const date = new Date(timestamp);
+            span.textContent = getTimeAgo(date);
+        }
+    });
+}
+
+function startTimelineUpdates() {
+    // Clear any existing interval
+    if (timelineUpdateInterval) {
+        clearInterval(timelineUpdateInterval);
+    }
+
+    // Update timestamps every 30 seconds
+    timelineUpdateInterval = setInterval(updateTimelineTimestamps, 30000);
+}
+
+function stopTimelineUpdates() {
+    if (timelineUpdateInterval) {
+        clearInterval(timelineUpdateInterval);
+        timelineUpdateInterval = null;
+    }
+}
+
 // Load saved preferences
 document.addEventListener('DOMContentLoaded', () => {
     // Load view mode preference
     const savedViewMode = localStorage.getItem('viewMode');
     if (savedViewMode) {
         currentViewMode = savedViewMode;
-    }
-    
-    // Load favorites
-    const savedFavorites = localStorage.getItem('favorites');
-    if (savedFavorites) {
-        favoritesCache = new Set(JSON.parse(savedFavorites));
     }
 });
 
@@ -1200,7 +2035,7 @@ style.textContent = `
     .animate-fadeIn {
         animation: fadeIn 0.6s ease-out forwards;
     }
-    
+
     @keyframes fadeIn {
         from {
             opacity: 0;
@@ -1211,15 +2046,30 @@ style.textContent = `
             transform: translateY(0);
         }
     }
-    
+
+    .animate-slideIn {
+        animation: slideIn 0.5s ease-out forwards;
+    }
+
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
     nav {
         transition: transform 0.3s ease-in-out;
     }
-    
+
     #comparison-bar {
         animation: slideInRight 0.3s ease-out;
     }
-    
+
     @keyframes slideInRight {
         from {
             transform: translateX(100%);
@@ -1230,11 +2080,11 @@ style.textContent = `
             opacity: 1;
         }
     }
-    
+
     .animate-shake {
         animation: shake 0.6s ease-in-out;
     }
-    
+
     @keyframes shake {
         0%, 100% { transform: translateX(0); }
         10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }

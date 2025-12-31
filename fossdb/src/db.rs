@@ -21,6 +21,7 @@ pub struct Database {
     package_ids: Arc<IdGenerator>,
     version_ids: Arc<IdGenerator>,
     user_ids: Arc<IdGenerator>,
+    #[allow(dead_code)]
     vulnerability_ids: Arc<IdGenerator>,
     timeline_ids: Arc<IdGenerator>,
 }
@@ -30,12 +31,42 @@ impl Database {
         // Open or create database using static MODELS
         let db = Builder::new().create(&MODELS, path)?;
 
-        // Initialize ID generators (start at 1)
-        let package_ids = Arc::new(IdGenerator::new(1));
-        let version_ids = Arc::new(IdGenerator::new(1));
-        let user_ids = Arc::new(IdGenerator::new(1));
-        let vulnerability_ids = Arc::new(IdGenerator::new(1));
-        let timeline_ids = Arc::new(IdGenerator::new(1));
+        // Scan database to find highest IDs and initialize generators
+        let r = db.r_transaction()?;
+
+        let max_package_id = r.scan().primary::<Package>()?.all()?
+            .map(|p| p.map(|pkg| pkg.id).unwrap_or(0))
+            .max()
+            .unwrap_or(0);
+
+        let max_version_id = r.scan().primary::<PackageVersion>()?.all()?
+            .map(|v| v.map(|ver| ver.id).unwrap_or(0))
+            .max()
+            .unwrap_or(0);
+
+        let max_user_id = r.scan().primary::<User>()?.all()?
+            .map(|u| u.map(|user| user.id).unwrap_or(0))
+            .max()
+            .unwrap_or(0);
+
+        let max_vulnerability_id = r.scan().primary::<Vulnerability>()?.all()?
+            .map(|v| v.map(|vuln| vuln.id).unwrap_or(0))
+            .max()
+            .unwrap_or(0);
+
+        let max_timeline_id = r.scan().primary::<TimelineEvent>()?.all()?
+            .map(|e| e.map(|event| event.id).unwrap_or(0))
+            .max()
+            .unwrap_or(0);
+
+        drop(r);
+
+        // Initialize ID generators starting from max_id + 1
+        let package_ids = Arc::new(IdGenerator::new(max_package_id + 1));
+        let version_ids = Arc::new(IdGenerator::new(max_version_id + 1));
+        let user_ids = Arc::new(IdGenerator::new(max_user_id + 1));
+        let vulnerability_ids = Arc::new(IdGenerator::new(max_vulnerability_id + 1));
+        let timeline_ids = Arc::new(IdGenerator::new(max_timeline_id + 1));
 
         Ok(Self {
             db,
@@ -100,6 +131,7 @@ impl Database {
         Ok(version)
     }
 
+    #[allow(dead_code)]
     pub fn get_version(&self, id: u64) -> Result<Option<PackageVersion>> {
         let r = self.db.r_transaction()?;
         Ok(r.get().primary(id)?)
@@ -144,6 +176,7 @@ impl Database {
         Ok(results.into_iter().next())
     }
 
+    #[allow(dead_code)]
     pub fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
         let r = self.db.r_transaction()?;
         let results: Vec<User> = r.scan().secondary(UserKey::username)?
@@ -170,6 +203,7 @@ impl Database {
     }
 
     // Vulnerability operations
+    #[allow(dead_code)]
     pub fn insert_vulnerability(&self, mut vuln: Vulnerability) -> Result<Vulnerability> {
         if vuln.id == 0 {
             vuln.id = self.vulnerability_ids.next();
@@ -180,6 +214,7 @@ impl Database {
         Ok(vuln)
     }
 
+    #[allow(dead_code)]
     pub fn get_vulnerability(&self, id: u64) -> Result<Option<Vulnerability>> {
         let r = self.db.r_transaction()?;
         Ok(r.get().primary(id)?)
@@ -202,6 +237,7 @@ impl Database {
         Ok(event)
     }
 
+    #[allow(dead_code)]
     pub fn get_timeline_event(&self, id: u64) -> Result<Option<TimelineEvent>> {
         let r = self.db.r_transaction()?;
         Ok(r.get().primary(id)?)
@@ -213,6 +249,7 @@ impl Database {
         Ok(all)
     }
 
+    #[allow(dead_code)]
     pub fn get_timeline_by_package(&self, package_id: u64) -> Result<Vec<TimelineEvent>> {
         let r = self.db.r_transaction()?;
         let events: Vec<TimelineEvent> = r.scan().secondary(TimelineEventKey::package_id)?
