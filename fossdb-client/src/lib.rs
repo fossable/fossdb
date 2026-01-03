@@ -98,6 +98,5 @@ pub fn App() -> Element {
 
 pub fn launch() {
     dioxus_logger::init(Level::INFO).expect("failed to init logger");
-    info!("Starting FossDB Dioxus Frontend");
     dioxus::launch(App);
 }

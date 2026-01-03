@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::db::Database;
-use crate::models::{Package, PackageVersion};
+use crate::{Package, PackageVersion};
 
 /// Helper for checking and inserting new versions for an existing package
 pub async fn check_and_insert_new_versions<F>(

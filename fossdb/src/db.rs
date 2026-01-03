@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use std::sync::Arc;
 
 use crate::id_generator::IdGenerator;
-use crate::models::*;
+use crate::*;
 
 // Macro for generating insert methods
 macro_rules! impl_insert {
@@ -266,7 +266,7 @@ impl Database {
             .filter(|e| {
                 e.user_id.is_some()
                     && e.notified_at.is_none()
-                    && e.event_type == crate::models::EventType::NewRelease
+                    && e.event_type == crate::EventType::NewRelease
             })
             .collect())
     }

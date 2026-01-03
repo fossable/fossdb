@@ -127,15 +127,15 @@ pub async fn get_analytics(
     // Calculate security stats from real vulnerabilities
     let critical_vulns = vulnerabilities
         .iter()
-        .filter(|v| matches!(v.severity, crate::models::VulnerabilitySeverity::Critical))
+        .filter(|v| matches!(v.severity, crate::VulnerabilitySeverity::Critical))
         .count() as u64;
     let minor_issues = vulnerabilities
         .iter()
         .filter(|v| {
             matches!(
                 v.severity,
-                crate::models::VulnerabilitySeverity::Low
-                    | crate::models::VulnerabilitySeverity::Medium
+                crate::VulnerabilitySeverity::Low
+                    | crate::VulnerabilitySeverity::Medium
             )
         })
         .count() as u64;
@@ -224,15 +224,15 @@ pub async fn get_security_report(
     let total = packages.len() as u64;
     let critical_vulns = vulnerabilities
         .iter()
-        .filter(|v| matches!(v.severity, crate::models::VulnerabilitySeverity::Critical))
+        .filter(|v| matches!(v.severity, crate::VulnerabilitySeverity::Critical))
         .count() as u64;
     let minor_issues = vulnerabilities
         .iter()
         .filter(|v| {
             matches!(
                 v.severity,
-                crate::models::VulnerabilitySeverity::Low
-                    | crate::models::VulnerabilitySeverity::Medium
+                crate::VulnerabilitySeverity::Low
+                    | crate::VulnerabilitySeverity::Medium
             )
         })
         .count() as u64;

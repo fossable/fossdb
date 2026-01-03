@@ -6,33 +6,10 @@ use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-/// Convert database TimelineEvent to API TimelineEvent
-fn convert_event(db_event: &crate::models::TimelineEvent) -> crate::TimelineEvent {
-    use crate::TimelineEventType;
-    use crate::models::EventType;
-
-    let event_type = match db_event.event_type {
-        EventType::NewRelease => TimelineEventType::NewRelease,
-        EventType::SecurityAlert => TimelineEventType::SecurityAlert,
-        EventType::PackageAdded => TimelineEventType::PackageAdded,
-        EventType::PackageUpdated => TimelineEventType::PackageUpdated,
-    };
-
-    crate::TimelineEvent {
-        id: db_event.id,
-        event_type,
-        package_name: db_event.package_name.clone(),
-        version: db_event.version.clone(),
-        message: db_event.description.clone(),
-        metadata: None,
-        created_at: db_event.created_at,
-    }
-}
-
 /// Broadcaster for timeline events
 #[derive(Clone)]
 pub struct TimelineBroadcaster {
-    tx: broadcast::Sender<crate::models::TimelineEvent>,
+    tx: broadcast::Sender<crate::TimelineEvent>,
 }
 
 impl TimelineBroadcaster {
@@ -42,13 +19,13 @@ impl TimelineBroadcaster {
     }
 
     /// Broadcast a timeline event to all connected clients
-    pub fn broadcast(&self, event: crate::models::TimelineEvent) {
+    pub fn broadcast(&self, event: crate::TimelineEvent) {
         // Ignore send errors - they just mean no receivers are listening
         let _ = self.tx.send(event);
     }
 
     /// Subscribe to timeline events
-    fn subscribe(&self) -> broadcast::Receiver<crate::models::TimelineEvent> {
+    fn subscribe(&self) -> broadcast::Receiver<crate::TimelineEvent> {
         self.tx.subscribe()
     }
 }
@@ -112,9 +89,7 @@ async fn handle_socket(socket: WebSocket, broadcaster: Arc<TimelineBroadcaster>)
                     };
 
                     if should_send {
-                        // Convert database model to API type before sending
-                        let api_event = convert_event(&db_event);
-                        let msg = crate::WebSocketMessage::TimelineEvent { event: api_event };
+                        let msg = crate::WebSocketMessage::TimelineEvent { event: db_event };
                         let json = serde_json::to_string(&msg).unwrap();
                         if sender.send(axum::extract::ws::Message::Text(json.into())).await.is_err() {
                             break;

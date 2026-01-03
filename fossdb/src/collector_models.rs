@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-// Re-export types from models for consistency
-pub use crate::models::Dependency;
+// Re-export types for consistency
+pub use crate::Dependency;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectedPackage {

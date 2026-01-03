@@ -4,7 +4,7 @@ use native_db::watch::Event;
 use std::sync::Arc;
 
 use crate::db::Database;
-use crate::models::{EventType, PackageVersion, TimelineEvent};
+use crate::{EventType, PackageVersion, TimelineEvent};
 use crate::websocket::TimelineBroadcaster;
 
 /// Spawns a background task that listens for PackageVersion inserts
@@ -88,7 +88,8 @@ async fn handle_package_version_event(
                     event_type: EventType::NewRelease,
                     package_name: package.name.clone(),
                     version: Some(version.version.clone()),
-                    description: format!("New version {} released", version.version),
+                    message: format!("New version {} released", version.version),
+                    metadata: None,
                     created_at: now,
                     notified_at: None,
                 };
@@ -127,7 +128,8 @@ async fn handle_package_version_event(
         event_type: EventType::NewRelease,
         package_name: package.name.clone(),
         version: Some(version.version.clone()),
-        description: format!("New version {} released", version.version),
+        message: format!("New version {} released", version.version),
+        metadata: None,
         created_at: now,
         notified_at: None,
     };

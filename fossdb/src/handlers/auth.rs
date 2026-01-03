@@ -2,7 +2,7 @@ use axum::{Form, extract::State, http::StatusCode, response::Json};
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::{AppState, auth::*, models::*};
+use crate::{AppState, auth::*, User, RegisterRequest, LoginRequest, AuthResponse};
 
 #[derive(Debug, Deserialize)]
 pub struct LoginForm {

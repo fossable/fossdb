@@ -16,9 +16,7 @@ use tracing::{error, info};
 
 // Import from the library
 use fossdb::{AppState, config::Config, db::Database, handlers, middleware};
-
-// Import model types directly
-use fossdb::models;
+use fossdb::{Package, PackageVersion, User, Vulnerability, TimelineEvent};
 
 #[cfg(feature = "email")]
 use fossdb::{email, notifications};
@@ -28,7 +26,7 @@ use fossdb::{collector_models, collectors};
 
 use fossdb::websocket;
 
-/// FossDB - A database for tracking free and open source software packages
+/// FossDB - Free Software Database
 #[derive(Parser, Debug)]
 #[command(name = "fossdb")]
 #[command(version, about, long_about = None)]
@@ -453,19 +451,19 @@ async fn import_database(config: &Config, input: PathBuf, merge: bool) -> Result
 
     match table_name {
         "packages" => {
-            let data: Vec<models::Package> = serde_json::from_str(&json)?;
+            let data: Vec<Package> = serde_json::from_str(&json)?;
             import_with_progress!(data, "packages", get_package, insert_package);
         }
         "versions" => {
-            let data: Vec<models::PackageVersion> = serde_json::from_str(&json)?;
+            let data: Vec<PackageVersion> = serde_json::from_str(&json)?;
             import_with_progress!(data, "versions", get_version, insert_version);
         }
         "users" => {
-            let data: Vec<models::User> = serde_json::from_str(&json)?;
+            let data: Vec<User> = serde_json::from_str(&json)?;
             import_with_progress!(data, "users", get_user, insert_user);
         }
         "vulnerabilities" => {
-            let data: Vec<models::Vulnerability> = serde_json::from_str(&json)?;
+            let data: Vec<Vulnerability> = serde_json::from_str(&json)?;
             import_with_progress!(
                 data,
                 "vulnerabilities",
@@ -474,7 +472,7 @@ async fn import_database(config: &Config, input: PathBuf, merge: bool) -> Result
             );
         }
         "timeline_events" => {
-            let data: Vec<models::TimelineEvent> = serde_json::from_str(&json)?;
+            let data: Vec<TimelineEvent> = serde_json::from_str(&json)?;
             import_with_progress!(
                 data,
                 "timeline events",

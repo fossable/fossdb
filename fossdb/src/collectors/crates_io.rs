@@ -32,7 +32,7 @@ impl Collector for CratesIoCollector {
     }
 
     async fn collect(&self, db: Arc<crate::db::Database>) -> Result<()> {
-        use crate::models::{Package, PackageVersion};
+        use crate::{Package, PackageVersion};
         use chrono::Utc;
         use std::collections::HashSet;
 

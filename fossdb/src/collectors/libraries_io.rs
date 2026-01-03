@@ -231,7 +231,7 @@ impl Collector for LibrariesIoCollector {
     }
 
     async fn collect(&self, db: Arc<crate::db::Database>) -> Result<()> {
-        use crate::models::{Package, PackageVersion};
+        use crate::{Package, PackageVersion};
         use std::collections::HashSet;
 
         // Get list of supported platforms

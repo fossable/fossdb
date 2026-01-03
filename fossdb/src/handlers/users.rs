@@ -6,30 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{AppState, auth::Claims, models::PackageSubscription};
-
-/// Convert database TimelineEvent to API TimelineEvent
-fn convert_timeline_event(db_event: &crate::models::TimelineEvent) -> crate::TimelineEvent {
-    use crate::TimelineEventType;
-    use crate::models::EventType;
-
-    let event_type = match db_event.event_type {
-        EventType::NewRelease => TimelineEventType::NewRelease,
-        EventType::SecurityAlert => TimelineEventType::SecurityAlert,
-        EventType::PackageAdded => TimelineEventType::PackageAdded,
-        EventType::PackageUpdated => TimelineEventType::PackageUpdated,
-    };
-
-    crate::TimelineEvent {
-        id: db_event.id,
-        event_type,
-        package_name: db_event.package_name.clone(),
-        version: db_event.version.clone(),
-        message: db_event.description.clone(),
-        metadata: None,
-        created_at: db_event.created_at,
-    }
-}
+use crate::{AppState, auth::Claims, PackageSubscription};
 
 #[derive(Debug, Deserialize)]
 pub struct SubscriptionRequest {
@@ -101,24 +78,16 @@ pub async fn get_timeline(
 
         db_events = db_events.into_iter().skip(offset).take(limit).collect();
 
-        // Convert database events to API events
-        let api_events: Vec<crate::TimelineEvent> =
-            db_events.iter().map(convert_timeline_event).collect();
-
         Ok(Json(serde_json::json!({
-            "events": api_events,
+            "events": db_events,
             "total": total,
             "limit": limit,
             "offset": offset
         })))
     } else {
-        // Convert database events to API events
-        let api_events: Vec<crate::TimelineEvent> =
-            db_events.iter().map(convert_timeline_event).collect();
-
         // Global timeline - no pagination metadata
         Ok(Json(serde_json::json!({
-            "events": api_events
+            "events": db_events
         })))
     }
 }
