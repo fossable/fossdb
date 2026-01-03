@@ -1,19 +1,20 @@
 use anyhow::Result;
-use lettre::{
-    message::Mailbox,
-    transport::smtp::authentication::Credentials,
-    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
-};
 use lettre::message::header::ContentType;
-use tera::{Context, Tera};
+use lettre::{
+    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor, message::Mailbox,
+    transport::smtp::authentication::Credentials,
+};
 use once_cell::sync::Lazy;
+use tera::{Context, Tera};
 
 use crate::config::Config;
 
 static TEMPLATES: Lazy<Tera> = Lazy::new(|| {
     let mut tera = Tera::default();
 
-    tera.add_raw_template("new_release.html", r#"
+    tera.add_raw_template(
+        "new_release.html",
+        r#"
 <!DOCTYPE html>
 <html>
 <head>
@@ -50,9 +51,13 @@ static TEMPLATES: Lazy<Tera> = Lazy::new(|| {
     </div>
 </body>
 </html>
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
-    tera.add_raw_template("new_release.txt", r#"
+    tera.add_raw_template(
+        "new_release.txt",
+        r#"
 New Release: {{ package_name }} {{ version }}
 
 A new version of {{ package_name }} has been released:
@@ -69,7 +74,9 @@ View package details: {{ package_url }}
 ---
 You're receiving this because you're subscribed to {{ package_name }}.
 Manage settings: {{ settings_url }}
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     tera
 });
@@ -82,18 +89,14 @@ pub struct EmailService {
 
 impl EmailService {
     pub fn new(config: Config) -> Result<Self> {
-        let creds = Credentials::new(
-            config.smtp_username.clone(),
-            config.smtp_password.clone(),
-        );
+        let creds = Credentials::new(config.smtp_username.clone(), config.smtp_password.clone());
 
         let mailer = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.smtp_host)?
             .credentials(creds)
             .port(config.smtp_port)
             .build();
 
-        let from = format!("{} <{}>", config.smtp_from_name, config.smtp_from_address)
-            .parse()?;
+        let from = format!("{} <{}>", config.smtp_from_name, config.smtp_from_address).parse()?;
 
         Ok(Self {
             mailer,
@@ -120,7 +123,10 @@ impl EmailService {
         context.insert("version", version);
         context.insert("release_date", release_date);
         context.insert("description", &description.unwrap_or(""));
-        context.insert("package_url", &format!("https://fossdb.org/packages/{}", package_name));
+        context.insert(
+            "package_url",
+            &format!("https://fossdb.org/packages/{}", package_name),
+        );
         context.insert("settings_url", "https://fossdb.org/settings");
 
         let html_body = TEMPLATES.render("new_release.html", &context)?;
@@ -146,7 +152,12 @@ impl EmailService {
 
         self.mailer.send(email).await?;
 
-        tracing::info!("Sent notification to {} for {} {}", to_email, package_name, version);
+        tracing::info!(
+            "Sent notification to {} for {} {}",
+            to_email,
+            package_name,
+            version
+        );
         Ok(())
     }
 }

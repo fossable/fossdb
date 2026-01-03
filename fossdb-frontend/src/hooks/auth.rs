@@ -55,9 +55,7 @@ impl AuthContext {
 pub fn use_auth() -> AuthContext {
     let auth_state = use_context::<Signal<AuthState>>();
 
-    AuthContext {
-        auth_state,
-    }
+    AuthContext { auth_state }
 }
 
 pub fn use_api_client() -> ApiClient {

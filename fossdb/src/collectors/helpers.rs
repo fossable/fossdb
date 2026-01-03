@@ -28,12 +28,20 @@ where
 
     for version_data in new_versions {
         if !existing_version_nums.contains(&version_data.version) {
-            tracing::info!("New version detected: {} {}", package_name, version_data.version);
+            tracing::info!(
+                "New version detected: {} {}",
+                package_name,
+                version_data.version
+            );
 
             let version = create_version(&version_data, package_id, now);
 
             if let Ok(_saved_version) = db.insert_version(version) {
-                tracing::info!("Saved new version {} for {}", version_data.version, package_name);
+                tracing::info!(
+                    "Saved new version {} for {}",
+                    version_data.version,
+                    package_name
+                );
                 new_count += 1;
             }
         }

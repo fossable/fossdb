@@ -28,7 +28,11 @@ fn format_time_ago(datetime: DateTime<Utc>) -> String {
     if seconds < 60 {
         "just now".to_string()
     } else if minutes < 60 {
-        format!("{} minute{} ago", minutes, if minutes == 1 { "" } else { "s" })
+        format!(
+            "{} minute{} ago",
+            minutes,
+            if minutes == 1 { "" } else { "s" }
+        )
     } else if hours < 24 {
         format!("{} hour{} ago", hours, if hours == 1 { "" } else { "s" })
     } else if days < 30 {

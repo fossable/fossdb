@@ -7,7 +7,7 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{models::*, AppState};
+use crate::{AppState, models::*};
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -29,7 +29,9 @@ pub async fn list_packages(
                 let search_lower = search.to_lowercase();
                 packages.retain(|pkg| {
                     pkg.name.to_lowercase().contains(&search_lower)
-                        || pkg.description.as_ref()
+                        || pkg
+                            .description
+                            .as_ref()
                             .map(|d| d.to_lowercase().contains(&search_lower))
                             .unwrap_or(false)
                 });
@@ -37,9 +39,7 @@ pub async fn list_packages(
 
             // Filter by tag if provided
             if let Some(tag) = &params.tag {
-                packages.retain(|pkg| {
-                    pkg.tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
-                });
+                packages.retain(|pkg| pkg.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)));
             }
 
             // Apply pagination
@@ -48,11 +48,8 @@ pub async fn list_packages(
             let page = params.page.unwrap_or(1).max(1);
             let offset = ((page - 1) * limit as u32) as usize;
 
-            let paginated_packages: Vec<Package> = packages
-                .into_iter()
-                .skip(offset)
-                .take(limit)
-                .collect();
+            let paginated_packages: Vec<Package> =
+                packages.into_iter().skip(offset).take(limit).collect();
 
             Ok(Json(serde_json::json!({
                 "packages": paginated_packages,
@@ -69,8 +66,7 @@ pub async fn get_package(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Package>, StatusCode> {
-    let id = id.parse::<u64>()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let id = id.parse::<u64>().map_err(|_| StatusCode::BAD_REQUEST)?;
 
     match state.db.get_package(id) {
         Ok(Some(package)) => Ok(Json(package)),
@@ -86,7 +82,7 @@ pub async fn create_package(
     let now = Utc::now();
 
     let package = Package {
-        id: 0,  // Will be auto-generated
+        id: 0, // Will be auto-generated
         name: payload.name,
         description: payload.description,
         homepage: payload.homepage,
@@ -113,8 +109,7 @@ pub async fn get_package_versions(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<PackageVersion>>, StatusCode> {
-    let id = id.parse::<u64>()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let id = id.parse::<u64>().map_err(|_| StatusCode::BAD_REQUEST)?;
 
     match state.db.get_versions_by_package(id) {
         Ok(versions) => Ok(Json(versions)),
@@ -126,8 +121,7 @@ pub async fn get_package_subscriber_count(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, StatusCode> {
-    let id = id.parse::<u64>()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let id = id.parse::<u64>().map_err(|_| StatusCode::BAD_REQUEST)?;
 
     // First get the package to get its name
     let package = match state.db.get_package(id) {

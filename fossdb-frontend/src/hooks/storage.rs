@@ -26,7 +26,10 @@ impl LocalStorage {
         GlooLocalStorage::get(key.as_str()).ok()
     }
 
-    pub fn set<T: Serialize>(key: StorageKey, value: &T) -> Result<(), gloo_storage::errors::StorageError> {
+    pub fn set<T: Serialize>(
+        key: StorageKey,
+        value: &T,
+    ) -> Result<(), gloo_storage::errors::StorageError> {
         GlooLocalStorage::set(key.as_str(), value)
     }
 

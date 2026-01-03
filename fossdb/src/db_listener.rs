@@ -1,10 +1,10 @@
 use anyhow::Result;
+use chrono::Utc;
 use native_db::watch::Event;
 use std::sync::Arc;
-use chrono::Utc;
 
 use crate::db::Database;
-use crate::models::{PackageVersion, TimelineEvent, EventType};
+use crate::models::{EventType, PackageVersion, TimelineEvent};
 use crate::websocket::TimelineBroadcaster;
 
 /// Spawns a background task that listens for PackageVersion inserts
@@ -23,11 +23,9 @@ pub fn spawn_package_version_listener(
         loop {
             match recv.recv() {
                 Ok(event) => {
-                    if let Err(e) = handle_package_version_event(
-                        event,
-                        db.clone(),
-                        broadcaster.clone()
-                    ).await {
+                    if let Err(e) =
+                        handle_package_version_event(event, db.clone(), broadcaster.clone()).await
+                    {
                         tracing::error!("Error handling package version event: {}", e);
                     }
                 }
@@ -117,11 +115,7 @@ async fn handle_package_version_event(
             }
         }
         Err(e) => {
-            tracing::error!(
-                "Failed to get subscribed users for {}: {}",
-                package.name,
-                e
-            );
+            tracing::error!("Failed to get subscribed users for {}: {}", package.name, e);
         }
     }
 

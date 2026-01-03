@@ -1,21 +1,21 @@
+use anyhow::Result;
 use axum::{
     Router,
     response::Json,
     routing::{get, post},
 };
 use clap::Parser;
+use serde::Serialize;
 use serde_json::{Value, json};
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tower_http::cors::CorsLayer;
+use tracing::{error, info};
 
 // Import from the library
-use fossdb::{
-    AppState,
-    db::Database,
-    config::Config,
-    handlers,
-    middleware,
-};
+use fossdb::{AppState, config::Config, db::Database, handlers, middleware};
 
 // Import model types directly
 use fossdb::models;
@@ -43,27 +43,30 @@ struct Args {
 
 #[derive(clap::Subcommand, Debug)]
 enum Commands {
-    /// Start the FossDB server (default)
+    /// Start the API server (default)
+    #[cfg(feature = "api-server")]
     Serve {
         /// Disable background collectors
         #[arg(long, default_value_t = false)]
         no_collectors: bool,
     },
     /// Export database tables to JSON files
+    #[cfg(feature = "db")]
     Export {
         /// Output directory (default: current directory)
         #[arg(short, long, default_value = ".")]
-        output_dir: std::path::PathBuf,
+        output_dir: PathBuf,
 
         /// Specific table to export (packages, versions, users, vulnerabilities, timeline_events)
         #[arg(short, long)]
         table: Option<String>,
     },
     /// Import database table from JSON file
+    #[cfg(feature = "db")]
     Import {
         /// Input file path (e.g., packages.json)
         #[arg(short, long)]
-        input: std::path::PathBuf,
+        input: PathBuf,
 
         /// Merge with existing data instead of replacing
         #[arg(long, default_value_t = false)]
@@ -72,7 +75,7 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     tracing_subscriber::fmt::init();
@@ -82,23 +85,31 @@ async fn main() -> anyhow::Result<()> {
 
     // Handle subcommands
     match args.command {
+        #[cfg(feature = "db")]
         Some(Commands::Export { output_dir, table }) => {
             return export_database(&config, output_dir, table).await;
         }
+        #[cfg(feature = "db")]
         Some(Commands::Import { input, merge }) => {
             return import_database(&config, input, merge).await;
         }
+        #[cfg(feature = "api-server")]
         Some(Commands::Serve { no_collectors }) => {
             return start_server(config, no_collectors).await;
         }
         None => {
-            // Default to serve with args.no_collectors
+            #[cfg(feature = "api-server")]
             return start_server(config, args.no_collectors).await;
+            #[cfg(not(feature = "api-server"))]
+            {
+                std::future::pending::<()>().await;
+                Ok(())
+            }
         }
     }
 }
 
-async fn start_server(config: Config, no_collectors: bool) -> anyhow::Result<()> {
+async fn start_server(config: Config, no_collectors: bool) -> Result<()> {
     // Initialize native_db
     let db = Database::new(&config.database_path)?;
     let db = Arc::new(db);
@@ -110,12 +121,12 @@ async fn start_server(config: Config, no_collectors: bool) -> anyhow::Result<()>
     let num_vulnerabilities = db.get_all_vulnerabilities()?.len();
     let num_timeline_events = db.get_all_timeline_events()?.len();
 
-    tracing::info!("Database statistics:");
-    tracing::info!("  Packages: {}", num_packages);
-    tracing::info!("  Versions: {}", num_versions);
-    tracing::info!("  Users: {}", num_users);
-    tracing::info!("  Vulnerabilities: {}", num_vulnerabilities);
-    tracing::info!("  Timeline Events: {}", num_timeline_events);
+    info!("Database statistics:");
+    info!("  Packages: {}", num_packages);
+    info!("  Versions: {}", num_versions);
+    info!("  Users: {}", num_users);
+    info!("  Vulnerabilities: {}", num_vulnerabilities);
+    info!("  Timeline Events: {}", num_timeline_events);
 
     // Initialize timeline broadcaster
     let broadcaster = Arc::new(websocket::TimelineBroadcaster::new());
@@ -123,8 +134,10 @@ async fn start_server(config: Config, no_collectors: bool) -> anyhow::Result<()>
     // Initialize database listener for automatic timeline event creation
     #[cfg(feature = "collector")]
     if !no_collectors {
-        if let Err(e) = fossdb::db_listener::spawn_package_version_listener(db.clone(), broadcaster.clone()) {
-            tracing::error!("Failed to initialize database listener: {}", e);
+        if let Err(e) =
+            fossdb::db_listener::spawn_package_version_listener(db.clone(), broadcaster.clone())
+        {
+            error!("Failed to initialize database listener: {}", e);
         }
     }
 
@@ -136,7 +149,7 @@ async fn start_server(config: Config, no_collectors: bool) -> anyhow::Result<()>
     // Initialize collectors (if not disabled)
     #[cfg(feature = "collector")]
     if !no_collectors {
-        tracing::info!("Starting background collectors...");
+        info!("Starting background collectors...");
 
         #[cfg(feature = "collector")]
         let mut collectors: Vec<Arc<dyn collector_models::Collector + Send + Sync>> = vec![];
@@ -146,35 +159,34 @@ async fn start_server(config: Config, no_collectors: bool) -> anyhow::Result<()>
             let client = reqwest::Client::builder().user_agent("fossdb").build()?;
             let crates_collector = collectors::crates_io::CratesIoCollector::new(client.clone());
             collectors.push(Arc::new(crates_collector));
+        }
 
-            // Optional: libraries.io collector
-            if let Some(api_key) = config.libraries_io_api_key.clone() {
-                let libraries_collector =
-                    collectors::libraries_io::LibrariesIoCollector::new(client.clone(), api_key);
-                collectors.push(Arc::new(libraries_collector));
-            }
+        #[cfg(feature = "collector-libraries-io")]
+        if let Some(api_key) = config.libraries_io_api_key.clone() {
+            let client = reqwest::Client::builder().user_agent("fossdb").build()?;
+            let libraries_collector =
+                collectors::libraries_io::LibrariesIoCollector::new(client.clone(), api_key);
+            collectors.push(Arc::new(libraries_collector));
+        } else {
+            use anyhow::bail;
+
+            bail!("No API given");
         }
 
         #[cfg(feature = "collector-nixpkgs")]
-        {
-            // nixpkgs collector
-            let nixpkgs_collector = collectors::nixpkgs::NixpkgsCollector::new();
-            collectors.push(Arc::new(nixpkgs_collector));
-        }
+        collectors.push(Arc::new(collectors::nixpkgs::NixpkgsCollector {}));
 
         // Spawn one background task per collector
         for collector in collectors {
             let db = db.clone();
             let interval_hours = config.collector_interval_hours;
-            tokio::spawn(async move {
-                run_collector_loop(collector, db, interval_hours).await
-            });
+            tokio::spawn(async move { run_collector_loop(collector, db, interval_hours).await });
         }
 
         // Initialize notification processor
         #[cfg(feature = "email")]
         if config.email_enabled {
-            tracing::info!("Starting notification processor...");
+            info!("Starting notification processor...");
 
             let email_service = Arc::new(
                 email::EmailService::new(config.clone())
@@ -188,7 +200,7 @@ async fn start_server(config: Config, no_collectors: bool) -> anyhow::Result<()>
             tokio::spawn(async move {
                 loop {
                     if let Err(e) = processor.process_new_releases().await {
-                        tracing::error!("Notification processing error: {}", e);
+                        error!("Notification processing error: {}", e);
                     }
 
                     tokio::time::sleep(tokio::time::Duration::from_secs(
@@ -200,13 +212,13 @@ async fn start_server(config: Config, no_collectors: bool) -> anyhow::Result<()>
         }
         #[cfg(feature = "email")]
         if !config.email_enabled {
-            tracing::info!("Email disabled, notification processor not started");
+            info!("Email disabled, notification processor not started");
         }
     }
 
     #[cfg(feature = "collector")]
     if no_collectors {
-        tracing::info!("Collectors disabled via --no-collectors flag");
+        info!("Collectors disabled via --no-collectors flag");
     }
 
     // Protected routes that require authentication
@@ -253,8 +265,14 @@ async fn start_server(config: Config, no_collectors: bool) -> anyhow::Result<()>
         .route("/api/stats", get(handlers::analytics::get_db_stats))
         .route("/api/packages", get(handlers::packages::list_packages))
         .route("/api/packages/{id}", get(handlers::packages::get_package))
-        .route("/api/packages/{id}/versions", get(handlers::packages::get_package_versions))
-        .route("/api/packages/{id}/subscribers", get(handlers::packages::get_package_subscriber_count))
+        .route(
+            "/api/packages/{id}/versions",
+            get(handlers::packages::get_package_versions),
+        )
+        .route(
+            "/api/packages/{id}/subscribers",
+            get(handlers::packages::get_package_subscriber_count),
+        )
         .route("/api/auth/register", post(handlers::auth::register))
         .route(
             "/api/auth/register-form",
@@ -278,7 +296,7 @@ async fn start_server(config: Config, no_collectors: bool) -> anyhow::Result<()>
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    tracing::info!("Server running on http://0.0.0.0:3000");
+    info!("Server running on http://0.0.0.0:3000");
 
     axum::serve(listener, app).await?;
     Ok(())
@@ -300,35 +318,35 @@ async fn run_collector_loop(
     let collector_name = collector.name();
 
     loop {
-        tracing::info!("Starting collector: {}", collector_name);
+        info!("Starting collector: {}", collector_name);
 
         match collector.collect(db.clone()).await {
             Ok(()) => {
-                tracing::info!("Collector {} completed successfully", collector_name);
+                info!("Collector {} completed successfully", collector_name);
             }
             Err(e) => {
-                tracing::error!("Collector {} failed: {}", collector_name, e);
+                error!("Collector {} failed: {}", collector_name, e);
             }
         }
 
         let sleep_duration = tokio::time::Duration::from_secs(interval_hours * 3600);
-        tracing::info!(
+        info!(
             "Collector {} sleeping for {} hours",
-            collector_name,
-            interval_hours
+            collector_name, interval_hours
         );
         tokio::time::sleep(sleep_duration).await;
     }
 }
 
 // Generic export function to avoid code duplication
-fn export_table<T: serde::Serialize>(
-    table_name: &str,
-    data: Vec<T>,
-    output_path: &std::path::Path,
-) -> anyhow::Result<()> {
-    tracing::info!("Exporting {}...", table_name);
-    eprintln!("Exporting {} {} to {}...", data.len(), table_name, output_path.display());
+fn export_table<T: Serialize>(table_name: &str, data: Vec<T>, output_path: &Path) -> Result<()> {
+    info!("Exporting {}...", table_name);
+    eprintln!(
+        "Exporting {} {} to {}...",
+        data.len(),
+        table_name,
+        output_path.display()
+    );
 
     let json = serde_json::to_string_pretty(&data)?;
     std::fs::write(output_path, json)?;
@@ -337,7 +355,11 @@ fn export_table<T: serde::Serialize>(
     Ok(())
 }
 
-async fn export_database(config: &Config, output_dir: std::path::PathBuf, table: Option<String>) -> anyhow::Result<()> {
+async fn export_database(
+    config: &Config,
+    output_dir: PathBuf,
+    table: Option<String>,
+) -> Result<()> {
     let db = Database::new(&config.database_path)?;
 
     // Create output directory if it doesn't exist
@@ -362,10 +384,21 @@ async fn export_database(config: &Config, output_dir: std::path::PathBuf, table:
             "packages" => export_table("packages", db.get_all_packages()?, &output_path)?,
             "versions" => export_table("versions", db.get_all_versions()?, &output_path)?,
             "users" => export_table("users", db.get_all_users()?, &output_path)?,
-            "vulnerabilities" => export_table("vulnerabilities", db.get_all_vulnerabilities()?, &output_path)?,
-            "timeline_events" => export_table("timeline events", db.get_all_timeline_events()?, &output_path)?,
+            "vulnerabilities" => export_table(
+                "vulnerabilities",
+                db.get_all_vulnerabilities()?,
+                &output_path,
+            )?,
+            "timeline_events" => export_table(
+                "timeline events",
+                db.get_all_timeline_events()?,
+                &output_path,
+            )?,
             _ => {
-                eprintln!("Error: Unknown table '{}'. Valid tables: packages, versions, users, vulnerabilities, timeline_events", table_name);
+                eprintln!(
+                    "Error: Unknown table '{}'. Valid tables: packages, versions, users, vulnerabilities, timeline_events",
+                    table_name
+                );
                 return Err(anyhow::anyhow!("Unknown table: {}", table_name));
             }
         }
@@ -376,7 +409,7 @@ async fn export_database(config: &Config, output_dir: std::path::PathBuf, table:
     Ok(())
 }
 
-async fn import_database(config: &Config, input: std::path::PathBuf, merge: bool) -> anyhow::Result<()> {
+async fn import_database(config: &Config, input: PathBuf, merge: bool) -> Result<()> {
     let db = Database::new(&config.database_path)?;
 
     // Determine table name from filename
@@ -385,7 +418,7 @@ async fn import_database(config: &Config, input: std::path::PathBuf, merge: bool
         .and_then(|s| s.to_str())
         .ok_or_else(|| anyhow::anyhow!("Invalid filename"))?;
 
-    tracing::info!("Importing {} (merge: {})...", table_name, merge);
+    info!("Importing {} (merge: {})...", table_name, merge);
     eprintln!("Reading from: {}", input.display());
 
     let json = std::fs::read_to_string(&input)?;
@@ -433,14 +466,27 @@ async fn import_database(config: &Config, input: std::path::PathBuf, merge: bool
         }
         "vulnerabilities" => {
             let data: Vec<models::Vulnerability> = serde_json::from_str(&json)?;
-            import_with_progress!(data, "vulnerabilities", get_vulnerability, insert_vulnerability);
+            import_with_progress!(
+                data,
+                "vulnerabilities",
+                get_vulnerability,
+                insert_vulnerability
+            );
         }
         "timeline_events" => {
             let data: Vec<models::TimelineEvent> = serde_json::from_str(&json)?;
-            import_with_progress!(data, "timeline events", get_timeline_event, insert_timeline_event);
+            import_with_progress!(
+                data,
+                "timeline events",
+                get_timeline_event,
+                insert_timeline_event
+            );
         }
         _ => {
-            eprintln!("Error: Unknown table '{}'. Valid tables: packages, versions, users, vulnerabilities, timeline_events", table_name);
+            eprintln!(
+                "Error: Unknown table '{}'. Valid tables: packages, versions, users, vulnerabilities, timeline_events",
+                table_name
+            );
             return Err(anyhow::anyhow!("Unknown table: {}", table_name));
         }
     }

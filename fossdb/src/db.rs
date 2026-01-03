@@ -1,10 +1,10 @@
-use native_db::*;
 use anyhow::Result;
-use std::sync::Arc;
+use native_db::*;
 use once_cell::sync::Lazy;
+use std::sync::Arc;
 
-use crate::models::*;
 use crate::id_generator::IdGenerator;
+use crate::models::*;
 
 // Macro for generating insert methods
 macro_rules! impl_insert {
@@ -79,7 +79,9 @@ macro_rules! impl_update {
 // Macro for finding max ID
 macro_rules! find_max_id {
     ($tx:expr, $type:ty) => {
-        $tx.scan().primary::<$type>()?.all()?
+        $tx.scan()
+            .primary::<$type>()?
+            .all()?
             .map(|e| e.map(|item| item.id).unwrap_or(0))
             .max()
             .unwrap_or(0)
@@ -145,7 +147,9 @@ impl Database {
 
     pub fn get_package_by_name(&self, name: &str) -> Result<Option<Package>> {
         let r = self.db.r_transaction()?;
-        let results: Vec<Package> = r.scan().secondary(PackageKey::name)?
+        let results: Vec<Package> = r
+            .scan()
+            .secondary(PackageKey::name)?
             .start_with(name)?
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -157,11 +161,17 @@ impl Database {
 
     // PackageVersion operations
     impl_insert!(insert_version, PackageVersion, version_ids);
-    impl_get!(#[allow(dead_code)] get_version, PackageVersion);
+    impl_get!(
+        #[allow(dead_code)]
+        get_version,
+        PackageVersion
+    );
 
     pub fn get_versions_by_package(&self, package_id: u64) -> Result<Vec<PackageVersion>> {
         let r = self.db.r_transaction()?;
-        let versions: Vec<PackageVersion> = r.scan().secondary(PackageVersionKey::package_id)?
+        let versions: Vec<PackageVersion> = r
+            .scan()
+            .secondary(PackageVersionKey::package_id)?
             .start_with(package_id)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(versions)
@@ -175,7 +185,9 @@ impl Database {
 
     pub fn get_user_by_email(&self, email: &str) -> Result<Option<User>> {
         let r = self.db.r_transaction()?;
-        let results: Vec<User> = r.scan().secondary(UserKey::email)?
+        let results: Vec<User> = r
+            .scan()
+            .secondary(UserKey::email)?
             .start_with(email)?
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -185,7 +197,9 @@ impl Database {
     #[allow(dead_code)]
     pub fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
         let r = self.db.r_transaction()?;
-        let results: Vec<User> = r.scan().secondary(UserKey::username)?
+        let results: Vec<User> = r
+            .scan()
+            .secondary(UserKey::username)?
             .start_with(username)?
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -196,19 +210,34 @@ impl Database {
     impl_update!(update_user, User);
 
     // Vulnerability operations
-    impl_insert!(#[allow(dead_code)] insert_vulnerability, Vulnerability, vulnerability_ids);
-    impl_get!(#[allow(dead_code)] get_vulnerability, Vulnerability);
+    impl_insert!(
+        #[allow(dead_code)]
+        insert_vulnerability,
+        Vulnerability,
+        vulnerability_ids
+    );
+    impl_get!(
+        #[allow(dead_code)]
+        get_vulnerability,
+        Vulnerability
+    );
     impl_get_all!(get_all_vulnerabilities, Vulnerability);
 
     // TimelineEvent operations
     impl_insert!(insert_timeline_event, TimelineEvent, timeline_ids);
-    impl_get!(#[allow(dead_code)] get_timeline_event, TimelineEvent);
+    impl_get!(
+        #[allow(dead_code)]
+        get_timeline_event,
+        TimelineEvent
+    );
     impl_get_all!(get_all_timeline_events, TimelineEvent);
 
     #[allow(dead_code)]
     pub fn get_timeline_by_package(&self, package_id: u64) -> Result<Vec<TimelineEvent>> {
         let r = self.db.r_transaction()?;
-        let events: Vec<TimelineEvent> = r.scan().secondary(TimelineEventKey::package_id)?
+        let events: Vec<TimelineEvent> = r
+            .scan()
+            .secondary(TimelineEventKey::package_id)?
             .start_with(package_id)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(events)
@@ -218,7 +247,9 @@ impl Database {
 
     pub fn get_timeline_events_by_user(&self, user_id: u64) -> Result<Vec<TimelineEvent>> {
         let r = self.db.r_transaction()?;
-        let events: Vec<TimelineEvent> = r.scan().secondary(TimelineEventKey::user_id)?
+        let events: Vec<TimelineEvent> = r
+            .scan()
+            .secondary(TimelineEventKey::user_id)?
             .start_with(Some(user_id))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(events)
@@ -226,12 +257,17 @@ impl Database {
 
     pub fn get_pending_notifications(&self) -> Result<Vec<TimelineEvent>> {
         let r = self.db.r_transaction()?;
-        let all_events: Vec<TimelineEvent> = r.scan().primary()?.all()?.collect::<Result<Vec<_>, _>>()?;
+        let all_events: Vec<TimelineEvent> =
+            r.scan().primary()?.all()?.collect::<Result<Vec<_>, _>>()?;
         // Filter in memory - native_db doesn't support complex queries
         // For better scalability, consider adding a compound index or separate pending_notifications table
         Ok(all_events
             .into_iter()
-            .filter(|e| e.user_id.is_some() && e.notified_at.is_none() && e.event_type == crate::models::EventType::NewRelease)
+            .filter(|e| {
+                e.user_id.is_some()
+                    && e.notified_at.is_none()
+                    && e.event_type == crate::models::EventType::NewRelease
+            })
             .collect())
     }
 
@@ -239,7 +275,11 @@ impl Database {
         let all_users = self.get_all_users()?;
         Ok(all_users
             .into_iter()
-            .filter(|u| u.subscriptions.iter().any(|s| s.package_name == package_name && s.notifications_enabled))
+            .filter(|u| {
+                u.subscriptions
+                    .iter()
+                    .any(|s| s.package_name == package_name && s.notifications_enabled)
+            })
             .map(|u| u.id)
             .collect())
     }

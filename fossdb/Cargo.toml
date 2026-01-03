@@ -26,14 +26,19 @@ api-server = [
 collector = ["db", "dep:tokio"]
 collector-rust = ["collector", "dep:reqwest", "dep:crates_io_api"]
 collector-nixpkgs = ["collector", "dep:reqwest"]
+collector-libraries-io = ["collector", "dep:reqwest"]
 email = ["dep:tokio", "dep:lettre", "dep:tera", "dep:once_cell"]
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
-
-# Async runtime (needed by api-server, collector, email)
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+futures = "0.3"
+regex = "1.0"
+semver = "1.0"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.0", features = ["full"], optional = true }
 
 # API server dependencies
@@ -48,12 +53,12 @@ tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true }
 dotenvy = { version = "0.15", optional = true }
 tokio-util = { version = "0.7", optional = true }
-governor = { version = "0.7", optional = true }
+governor = { version = "0.10.4", optional = true }
 
 # Collector dependencies
-reqwest = { version = "0.12.28", default-features = false, features = [
+reqwest = { version = "0.13.1", default-features = false, features = [
   "json",
-  "rustls-tls",
+  "rustls",
 ], optional = true }
 crates_io_api = { version = "0.12", default-features = false, features = [
   "rustls",
@@ -72,15 +77,3 @@ once_cell = { version = "1.19", optional = true }
 # Database dependencies
 native_db = { version = "0.8.2", optional = true }
 native_model = { version = "0.4.20", optional = true }
-
-# Shared dependencies (always included)
-serde_json = "1.0"
-regex = "1.0"
-semver = "1.0"
-async-trait = "0.1"
-futures = "0.3"
-clap = { version = "4.5", features = ["derive"] }
-
-[[bin]]
-name = "fossdb"
-required-features = ["api-server"]

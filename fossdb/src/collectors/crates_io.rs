@@ -14,10 +14,13 @@ impl CratesIoCollector {
         // crates_io_api handles rate limiting internally (1 req/s)
         // We don't need our custom rate limiting for this collector
         Self {
-            client: Arc::new(AsyncClient::new(
-                "fossdb (https://github.com/fossable/fossdb)",
-                std::time::Duration::from_millis(1000),
-            ).expect("Failed to create crates.io client")),
+            client: Arc::new(
+                AsyncClient::new(
+                    "fossdb (https://github.com/fossable/fossdb)",
+                    std::time::Duration::from_millis(1000),
+                )
+                .expect("Failed to create crates.io client"),
+            ),
         }
     }
 }
@@ -29,8 +32,8 @@ impl Collector for CratesIoCollector {
     }
 
     async fn collect(&self, db: Arc<crate::db::Database>) -> Result<()> {
-        use chrono::Utc;
         use crate::models::{Package, PackageVersion};
+        use chrono::Utc;
         use std::collections::HashSet;
 
         // Scrape first 3 pages of recently updated crates
@@ -44,7 +47,11 @@ impl Collector for CratesIoCollector {
             // Use async client directly
             let crates_page = self.client.crates(query).await?;
 
-            tracing::info!("Fetched {} crates from page {}", crates_page.crates.len(), page);
+            tracing::info!(
+                "Fetched {} crates from page {}",
+                crates_page.crates.len(),
+                page
+            );
 
             // For each crate, check if we need to update it
             for krate in &crates_page.crates {
@@ -76,7 +83,8 @@ impl Collector for CratesIoCollector {
 
                         match self.client.full_crate(&crate_name, false).await {
                             Ok(full_crate) => {
-                                let existing_versions = db.get_versions_by_package(existing_package.id)?;
+                                let existing_versions =
+                                    db.get_versions_by_package(existing_package.id)?;
                                 let existing_version_nums: HashSet<String> = existing_versions
                                     .iter()
                                     .map(|v| v.version.clone())
@@ -85,20 +93,24 @@ impl Collector for CratesIoCollector {
                                 let now = Utc::now();
 
                                 // Check for new versions
-                                for v in full_crate.versions.iter()
-                                    .filter(|v| !v.yanked)
-                                    .take(10)
-                                {
+                                for v in full_crate.versions.iter().filter(|v| !v.yanked).take(10) {
                                     if !existing_version_nums.contains(&v.num) {
                                         // NEW VERSION FOUND!
-                                        tracing::info!("New version detected: {} {}", crate_name, v.num);
+                                        tracing::info!(
+                                            "New version detected: {} {}",
+                                            crate_name,
+                                            v.num
+                                        );
 
                                         let version = PackageVersion {
                                             id: 0,
                                             package_id: existing_package.id,
                                             version: v.num.clone(),
                                             release_date: v.created_at,
-                                            download_url: Some(format!("https://crates.io{}", v.dl_path)),
+                                            download_url: Some(format!(
+                                                "https://crates.io{}",
+                                                v.dl_path
+                                            )),
                                             checksum: None,
                                             dependencies: Vec::new(),
                                             vulnerabilities: Vec::new(),
@@ -108,7 +120,11 @@ impl Collector for CratesIoCollector {
 
                                         // Save version - timeline events will be created automatically by the database listener
                                         if let Ok(_saved_version) = db.insert_version(version) {
-                                            tracing::info!("Saved new version {} for {}", v.num, crate_name);
+                                            tracing::info!(
+                                                "Saved new version {} for {}",
+                                                v.num,
+                                                crate_name
+                                            );
                                         }
                                     }
                                 }
@@ -117,11 +133,19 @@ impl Collector for CratesIoCollector {
                                 let mut updated_package = existing_package.clone();
                                 updated_package.updated_at = krate.updated_at;
                                 if let Err(e) = db.update_package(updated_package) {
-                                    tracing::error!("Failed to update package {} timestamp: {}", crate_name, e);
+                                    tracing::error!(
+                                        "Failed to update package {} timestamp: {}",
+                                        crate_name,
+                                        e
+                                    );
                                 }
                             }
                             Err(e) => {
-                                tracing::warn!("Failed to fetch crate details for {}: {}", crate_name, e);
+                                tracing::warn!(
+                                    "Failed to fetch crate details for {}: {}",
+                                    crate_name,
+                                    e
+                                );
                             }
                         }
                         continue;
@@ -141,7 +165,10 @@ impl Collector for CratesIoCollector {
                                     description: full_crate.description.clone(),
                                     homepage: full_crate.homepage.clone(),
                                     repository: full_crate.repository.clone(),
-                                    license: full_crate.versions.first().and_then(|v| v.license.clone()),
+                                    license: full_crate
+                                        .versions
+                                        .first()
+                                        .and_then(|v| v.license.clone()),
                                     maintainers: Vec::new(), // crates_io_api doesn't expose maintainers easily
                                     tags: vec!["rust".to_string(), "crate".to_string()],
                                     created_at: now,
@@ -158,7 +185,9 @@ impl Collector for CratesIoCollector {
                                         tracing::info!("Saved package: {}", saved_package.name);
 
                                         // Save versions (up to 10 non-yanked versions)
-                                        for v in full_crate.versions.iter()
+                                        for v in full_crate
+                                            .versions
+                                            .iter()
                                             .filter(|v| !v.yanked)
                                             .take(10)
                                         {
@@ -167,7 +196,10 @@ impl Collector for CratesIoCollector {
                                                 package_id: saved_package.id,
                                                 version: v.num.clone(),
                                                 release_date: v.created_at,
-                                                download_url: Some(format!("https://crates.io{}", v.dl_path)),
+                                                download_url: Some(format!(
+                                                    "https://crates.io{}",
+                                                    v.dl_path
+                                                )),
                                                 checksum: None,
                                                 dependencies: Vec::new(), // Could fetch dependencies if needed
                                                 vulnerabilities: Vec::new(),
@@ -201,16 +233,16 @@ impl Collector for CratesIoCollector {
                                 }
                             }
                             Err(e) => {
-                                tracing::warn!("Failed to fetch details for crate {}: {}", crate_name_for_log, e);
+                                tracing::warn!(
+                                    "Failed to fetch details for crate {}: {}",
+                                    crate_name_for_log,
+                                    e
+                                );
                             }
                         }
                     }
                     Err(e) => {
-                        tracing::error!(
-                            "Failed to check if package {} exists: {}",
-                            crate_name,
-                            e
-                        );
+                        tracing::error!("Failed to check if package {} exists: {}", crate_name, e);
                     }
                 }
             }

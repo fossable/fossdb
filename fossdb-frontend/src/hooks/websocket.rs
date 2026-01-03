@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use futures::StreamExt;
 use gloo_net::websocket::{futures::WebSocket, Message};
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Clone, Copy)]
 pub struct WebSocketState {

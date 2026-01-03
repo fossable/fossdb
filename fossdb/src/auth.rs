@@ -1,7 +1,7 @@
 use anyhow::Result;
-use bcrypt::{hash, verify, DEFAULT_COST};
+use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,7 +35,11 @@ pub fn create_jwt(user_id: &str, username: &str) -> Result<String> {
 
     let config = crate::config::Config::from_env();
     let secret = config.jwt_secret;
-    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_ref()))?;
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )?;
     Ok(token)
 }
 

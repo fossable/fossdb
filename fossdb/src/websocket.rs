@@ -1,5 +1,5 @@
 use axum::{
-    extract::{ws::WebSocket, State, WebSocketUpgrade},
+    extract::{State, WebSocketUpgrade, ws::WebSocket},
     response::Response,
 };
 use futures::{SinkExt, StreamExt};
@@ -8,8 +8,8 @@ use tokio::sync::broadcast;
 
 /// Convert database TimelineEvent to API TimelineEvent
 fn convert_event(db_event: &crate::models::TimelineEvent) -> crate::TimelineEvent {
-    use crate::models::EventType;
     use crate::TimelineEventType;
+    use crate::models::EventType;
 
     let event_type = match db_event.event_type {
         EventType::NewRelease => TimelineEventType::NewRelease,

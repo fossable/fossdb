@@ -1,13 +1,8 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json,
-    Form,
-};
+use axum::{Form, extract::State, http::StatusCode, response::Json};
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::{auth::*, models::*, AppState};
+use crate::{AppState, auth::*, models::*};
 
 #[derive(Debug, Deserialize)]
 pub struct LoginForm {
@@ -42,30 +37,28 @@ async fn register_user(
     email: String,
     password: String,
 ) -> Result<Json<AuthResponse>, StatusCode> {
-    let password_hash = hash_password(&password)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let password_hash = hash_password(&password).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let user = User {
-        id: 0,  // Will be auto-generated
+        id: 0, // Will be auto-generated
         username: username.clone(),
         email,
         password_hash,
         subscriptions: Vec::new(),
         created_at: Utc::now(),
         is_verified: false,
-        notifications_enabled: true,  // Enable notifications by default
+        notifications_enabled: true, // Enable notifications by default
     };
 
-    let user = state.db.insert_user(user)
+    let user = state
+        .db
+        .insert_user(user)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let token = create_jwt(&user.id.to_string(), &user.username)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(AuthResponse {
-        token,
-        user,
-    }))
+    Ok(Json(AuthResponse { token, user }))
 }
 
 pub async fn login(
@@ -88,7 +81,9 @@ async fn login_user(
     password: String,
 ) -> Result<Json<AuthResponse>, StatusCode> {
     // Use indexed email lookup
-    let user = state.db.get_user_by_email(&email)
+    let user = state
+        .db
+        .get_user_by_email(&email)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
@@ -102,8 +97,5 @@ async fn login_user(
     let token = create_jwt(&user.id.to_string(), &user.username)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(AuthResponse {
-        token,
-        user,
-    }))
+    Ok(Json(AuthResponse { token, user }))
 }

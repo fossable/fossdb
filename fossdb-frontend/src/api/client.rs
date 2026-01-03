@@ -2,8 +2,8 @@ use super::types::*;
 use gloo_console::log;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use wasm_bindgen::JsValue;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
 
@@ -59,7 +59,9 @@ impl ApiClient {
         request.headers().set("Content-Type", "application/json")?;
 
         if let Some(token) = &self.token {
-            request.headers().set("Authorization", &format!("Bearer {}", token))?;
+            request
+                .headers()
+                .set("Authorization", &format!("Bearer {}", token))?;
         }
 
         let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window"))?;
@@ -70,8 +72,13 @@ impl ApiClient {
             return Err(JsValue::from_str(&format!("HTTP error: {}", resp.status())));
         }
 
-        let json = JsFuture::from(resp.json().map_err(|_| JsValue::from_str("Failed to parse response"))?).await?;
-        serde_wasm_bindgen::from_value(json).map_err(|e| JsValue::from_str(&format!("Deserialization error: {:?}", e)))
+        let json = JsFuture::from(
+            resp.json()
+                .map_err(|_| JsValue::from_str("Failed to parse response"))?,
+        )
+        .await?;
+        serde_wasm_bindgen::from_value(json)
+            .map_err(|e| JsValue::from_str(&format!("Deserialization error: {:?}", e)))
     }
 
     pub async fn login(&self, email: String, password: String) -> Result<AuthResponse> {
@@ -90,7 +97,8 @@ impl ApiClient {
             username,
             email,
             password,
-        }).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
+        })
+        .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
         self.request("POST", "/auth/register", Some(body)).await
     }
 
@@ -98,7 +106,12 @@ impl ApiClient {
         self.request("GET", "/stats", None).await
     }
 
-    pub async fn get_packages(&self, search: Option<String>, page: u32, limit: u32) -> Result<PackagesResponse> {
+    pub async fn get_packages(
+        &self,
+        search: Option<String>,
+        page: u32,
+        limit: u32,
+    ) -> Result<PackagesResponse> {
         let mut path = format!("/packages?page={}&limit={}", page, limit);
         if let Some(query) = search {
             path.push_str(&format!("&search={}", query));
@@ -107,11 +120,13 @@ impl ApiClient {
     }
 
     pub async fn get_package(&self, id: &str) -> Result<Package> {
-        self.request("GET", &format!("/packages/{}", id), None).await
+        self.request("GET", &format!("/packages/{}", id), None)
+            .await
     }
 
     pub async fn get_package_versions(&self, id: &str) -> Result<Vec<PackageVersion>> {
-        self.request("GET", &format!("/packages/{}/versions", id), None).await
+        self.request("GET", &format!("/packages/{}/versions", id), None)
+            .await
     }
 
     pub async fn get_package_subscribers(&self, id: &str) -> Result<usize> {
@@ -132,11 +147,17 @@ impl ApiClient {
     pub async fn subscribe(&self, package_name: String) -> Result<()> {
         let body = serde_json::to_string(&SubscriptionRequest { package_name })
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
-        self.request("POST", "/users/subscriptions", Some(body)).await
+        self.request("POST", "/users/subscriptions", Some(body))
+            .await
     }
 
     pub async fn unsubscribe(&self, package_name: &str) -> Result<()> {
-        self.request("DELETE", &format!("/users/subscriptions/{}", package_name), None).await
+        self.request(
+            "DELETE",
+            &format!("/users/subscriptions/{}", package_name),
+            None,
+        )
+        .await
     }
 
     pub async fn toggle_notifications(&self, package_name: &str, enabled: bool) -> Result<()> {
@@ -146,7 +167,8 @@ impl ApiClient {
         }
         let body = serde_json::to_string(&NotificationToggle {
             notifications_enabled: enabled,
-        }).map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
+        })
+        .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
         self.request(
             "PUT",
             &format!("/users/subscriptions/{}/notifications", package_name),

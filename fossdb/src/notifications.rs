@@ -2,10 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use std::sync::Arc;
 
-use crate::{
-    db::Database,
-    email::EmailService,
-};
+use crate::{db::Database, email::EmailService};
 
 pub struct NotificationProcessor {
     db: Arc<Database>,
@@ -46,11 +43,20 @@ impl NotificationProcessor {
             let user = match self.db.get_user(user_id) {
                 Ok(Some(u)) => u,
                 Ok(None) => {
-                    tracing::warn!("User {} not found for event {}, skipping", user_id, event.id);
+                    tracing::warn!(
+                        "User {} not found for event {}, skipping",
+                        user_id,
+                        event.id
+                    );
                     continue;
                 }
                 Err(e) => {
-                    tracing::error!("Failed to get user {} for event {}: {}", user_id, event.id, e);
+                    tracing::error!(
+                        "Failed to get user {} for event {}: {}",
+                        user_id,
+                        event.id,
+                        e
+                    );
                     continue;
                 }
             };
@@ -66,11 +72,20 @@ impl NotificationProcessor {
             let package = match self.db.get_package(event.package_id) {
                 Ok(Some(p)) => p,
                 Ok(None) => {
-                    tracing::warn!("Package {} not found for event {}, skipping", event.package_id, event.id);
+                    tracing::warn!(
+                        "Package {} not found for event {}, skipping",
+                        event.package_id,
+                        event.id
+                    );
                     continue;
                 }
                 Err(e) => {
-                    tracing::error!("Failed to get package {} for event {}: {}", event.package_id, event.id, e);
+                    tracing::error!(
+                        "Failed to get package {} for event {}: {}",
+                        event.package_id,
+                        event.id,
+                        e
+                    );
                     continue;
                 }
             };
@@ -80,13 +95,17 @@ impl NotificationProcessor {
             let release_date = event.created_at.format("%Y-%m-%d %H:%M UTC").to_string();
 
             // Send email
-            match self.email.send_new_release_notification(
-                &user.email,
-                &event.package_name,
-                version,
-                &release_date,
-                package.description.as_deref(),
-            ).await {
+            match self
+                .email
+                .send_new_release_notification(
+                    &user.email,
+                    &event.package_name,
+                    version,
+                    &release_date,
+                    package.description.as_deref(),
+                )
+                .await
+            {
                 Ok(()) => {
                     // Mark notification as sent
                     event.notified_at = Some(Utc::now());

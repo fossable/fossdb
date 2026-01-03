@@ -1,5 +1,5 @@
 [application]
-name = "frontend-dioxus"
+name = "fossdb-frontend"
 default_platform = "web"
 
 [web.app]

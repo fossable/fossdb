@@ -5,8 +5,8 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::collector_models::{Collector, CollectedPackage, CollectedVersion, Dependency};
-use crate::client::{AdaptiveRateLimitedClient, AdaptiveConfig};
+use crate::client::{AdaptiveConfig, AdaptiveRateLimitedClient};
+use crate::collector_models::{CollectedPackage, CollectedVersion, Collector, Dependency};
 
 pub struct LibrariesIoCollector {
     client: AdaptiveRateLimitedClient,
@@ -68,9 +68,9 @@ impl LibrariesIoCollector {
         // libraries.io has a 60 req/min rate limit for authenticated requests
         // Start conservative and let it adapt
         let config = AdaptiveConfig {
-            initial_rate: 30,  // 30 req/min
-            min_rate: 6,       // 6 req/min minimum
-            max_rate: 60,      // 60 req/min maximum
+            initial_rate: 30, // 30 req/min
+            min_rate: 6,      // 6 req/min minimum
+            max_rate: 60,     // 60 req/min maximum
         };
         let adaptive_client = AdaptiveRateLimitedClient::new(client, config);
         Self {
@@ -80,14 +80,22 @@ impl LibrariesIoCollector {
     }
 
     async fn get_platforms(&self) -> Result<Vec<LibrariesIoPlatform>> {
-        let url = format!("https://libraries.io/api/platforms?api_key={}", self.api_key);
+        let url = format!(
+            "https://libraries.io/api/platforms?api_key={}",
+            self.api_key
+        );
 
         let response = self.client.get(&url).await?;
         let platforms: Vec<LibrariesIoPlatform> = response.json().await?;
         Ok(platforms)
     }
 
-    async fn get_project_dependencies(&self, platform: &str, name: &str, version: Option<&str>) -> Result<Vec<Dependency>> {
+    async fn get_project_dependencies(
+        &self,
+        platform: &str,
+        name: &str,
+        version: Option<&str>,
+    ) -> Result<Vec<Dependency>> {
         let version_param = version.unwrap_or("latest");
         let url = format!(
             "https://libraries.io/api/{}/{}/{}/dependencies?api_key={}",
@@ -96,7 +104,7 @@ impl LibrariesIoCollector {
 
         let response = self.client.get(&url).await?;
         let dependencies: Vec<LibrariesIoDependency> = response.json().await.unwrap_or_default();
-        
+
         let deps = dependencies
             .into_iter()
             .map(|dep| Dependency {
@@ -110,7 +118,11 @@ impl LibrariesIoCollector {
         Ok(deps)
     }
 
-    async fn get_project_details(&self, platform: &str, name: &str) -> Result<Option<LibrariesIoProject>> {
+    async fn get_project_details(
+        &self,
+        platform: &str,
+        name: &str,
+    ) -> Result<Option<LibrariesIoProject>> {
         let url = format!(
             "https://libraries.io/api/{}/{}?api_key={}",
             platform, name, self.api_key
@@ -126,25 +138,42 @@ impl LibrariesIoCollector {
         Ok(Some(project))
     }
 
-    async fn scrape_platform(&self, platform: &LibrariesIoPlatform) -> Result<Vec<CollectedPackage>> {
+    async fn scrape_platform(
+        &self,
+        platform: &LibrariesIoPlatform,
+    ) -> Result<Vec<CollectedPackage>> {
         let mut packages = Vec::new();
-        
+
         // Search for popular packages on this platform
         let search_url = format!(
             "https://libraries.io/api/search?platforms={}&sort=rank&per_page=50&api_key={}",
-            platform.name.to_lowercase(), self.api_key
+            platform.name.to_lowercase(),
+            self.api_key
         );
 
         let response = self.client.get(&search_url).await?;
         let search_results: Vec<LibrariesIoProject> = response.json().await.unwrap_or_default();
 
-        for project in search_results.into_iter().take(20) { // Limit to 20 packages per platform
-            if let Some(project_details) = self.get_project_details(&project.platform, &project.name).await.unwrap_or(None) {
+        for project in search_results.into_iter().take(20) {
+            // Limit to 20 packages per platform
+            if let Some(project_details) = self
+                .get_project_details(&project.platform, &project.name)
+                .await
+                .unwrap_or(None)
+            {
                 let mut versions = Vec::new();
-                
+
                 // Create a version from the latest release info if available
-                if let (Some(version_num), Some(release_date)) = (&project_details.latest_release_number, &project_details.latest_release_published_at) {
-                    let dependencies = self.get_project_dependencies(&project.platform, &project.name, Some(version_num))
+                if let (Some(version_num), Some(release_date)) = (
+                    &project_details.latest_release_number,
+                    &project_details.latest_release_published_at,
+                ) {
+                    let dependencies = self
+                        .get_project_dependencies(
+                            &project.platform,
+                            &project.name,
+                            Some(version_num),
+                        )
                         .await
                         .unwrap_or_default();
 
@@ -162,7 +191,7 @@ impl LibrariesIoCollector {
                     project_details.platform.to_lowercase(),
                     "libraries.io".to_string(),
                 ];
-                
+
                 if let Some(lang) = &project_details.language {
                     tags.push(lang.to_lowercase());
                 }
@@ -209,7 +238,15 @@ impl Collector for LibrariesIoCollector {
         let platforms = self.get_platforms().await?;
 
         // Focus on the most popular platforms to avoid overwhelming the API
-        let priority_platforms = ["NPM", "Maven", "PyPI", "Packagist", "Go", "NuGet", "RubyGems"];
+        let priority_platforms = [
+            "NPM",
+            "Maven",
+            "PyPI",
+            "Packagist",
+            "Go",
+            "NuGet",
+            "RubyGems",
+        ];
 
         for platform in platforms {
             if priority_platforms.contains(&platform.name.as_str()) {
@@ -217,7 +254,11 @@ impl Collector for LibrariesIoCollector {
 
                 match self.scrape_platform(&platform).await {
                     Ok(packages) => {
-                        tracing::info!("Found {} packages from platform {}", packages.len(), platform.name);
+                        tracing::info!(
+                            "Found {} packages from platform {}",
+                            packages.len(),
+                            platform.name
+                        );
 
                         // Save each package to the database
                         for package_data in packages {
@@ -230,13 +271,18 @@ impl Collector for LibrariesIoCollector {
                                         package_data.name
                                     );
 
-                                    let existing_versions = match db.get_versions_by_package(existing_package.id) {
-                                        Ok(v) => v,
-                                        Err(e) => {
-                                            tracing::error!("Failed to get existing versions for {}: {}", package_data.name, e);
-                                            continue;
-                                        }
-                                    };
+                                    let existing_versions =
+                                        match db.get_versions_by_package(existing_package.id) {
+                                            Ok(v) => v,
+                                            Err(e) => {
+                                                tracing::error!(
+                                                    "Failed to get existing versions for {}: {}",
+                                                    package_data.name,
+                                                    e
+                                                );
+                                                continue;
+                                            }
+                                        };
 
                                     let existing_version_nums: HashSet<String> = existing_versions
                                         .iter()
@@ -248,7 +294,11 @@ impl Collector for LibrariesIoCollector {
                                     for version_data in package_data.versions {
                                         if !existing_version_nums.contains(&version_data.version) {
                                             // New version found
-                                            tracing::info!("New version detected: {} {}", package_data.name, version_data.version);
+                                            tracing::info!(
+                                                "New version detected: {} {}",
+                                                package_data.name,
+                                                version_data.version
+                                            );
 
                                             let version = PackageVersion {
                                                 id: 0,
@@ -265,7 +315,11 @@ impl Collector for LibrariesIoCollector {
 
                                             // Timeline events will be created automatically by the database listener
                                             if db.insert_version(version).is_ok() {
-                                                tracing::info!("Saved new version {} for {}", version_data.version, package_data.name);
+                                                tracing::info!(
+                                                    "Saved new version {} for {}",
+                                                    version_data.version,
+                                                    package_data.name
+                                                );
                                             }
                                         }
                                     }

@@ -25,8 +25,7 @@ pub fn use_scroll_direction() -> Signal<ScrollDirection> {
             }
         }) as Box<dyn FnMut(Event)>);
 
-        win
-            .add_event_listener_with_callback("scroll", closure.as_ref().unchecked_ref())
+        win.add_event_listener_with_callback("scroll", closure.as_ref().unchecked_ref())
             .expect("failed to add event listener");
 
         closure.forget();

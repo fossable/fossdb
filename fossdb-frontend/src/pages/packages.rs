@@ -1,7 +1,7 @@
-use crate::api::ApiClient;
-use crate::components::{PackageCard, use_comparison};
-use crate::hooks::{use_auth, LocalStorage, StorageKey};
 use crate::api::types::Package;
+use crate::api::ApiClient;
+use crate::components::{use_comparison, PackageCard};
+use crate::hooks::{use_auth, LocalStorage, StorageKey};
 use dioxus::prelude::*;
 
 #[derive(Clone, PartialEq)]
@@ -41,8 +41,7 @@ pub fn Packages() -> Element {
 
     // Load view mode from localStorage
     let mut view_mode = use_signal(|| {
-        LocalStorage::get::<String>(StorageKey::ViewMode)
-            .unwrap_or_else(|| "grid".to_string())
+        LocalStorage::get::<String>(StorageKey::ViewMode).unwrap_or_else(|| "grid".to_string())
     });
 
     let token = auth.token();

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 // Re-export types from models for consistency
 pub use crate::models::Dependency;
@@ -34,8 +34,5 @@ pub struct CollectedVersion {
 #[async_trait::async_trait]
 pub trait Collector: Send + Sync {
     fn name(&self) -> &str;
-    async fn collect(
-        &self,
-        db: std::sync::Arc<crate::db::Database>,
-    ) -> anyhow::Result<()>;
+    async fn collect(&self, db: std::sync::Arc<crate::db::Database>) -> anyhow::Result<()>;
 }

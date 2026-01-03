@@ -1,10 +1,6 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json,
-};
-use serde::Serialize;
 use crate::AppState;
+use axum::{extract::State, http::StatusCode, response::Json};
+use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct DatabaseStats {
@@ -70,9 +66,13 @@ pub async fn get_analytics(
     State(state): State<AppState>,
 ) -> Result<Json<AnalyticsResponse>, StatusCode> {
     // Fetch real data from database
-    let packages = state.db.get_all_packages()
+    let packages = state
+        .db
+        .get_all_packages()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let vulnerabilities = state.db.get_all_vulnerabilities()
+    let vulnerabilities = state
+        .db
+        .get_all_vulnerabilities()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let total = packages.len() as u64;
@@ -99,7 +99,11 @@ pub async fn get_analytics(
         .into_iter()
         .map(|(lang, count)| LanguageStats {
             language: lang,
-            percentage: if total > 0 { (count as f32 / total as f32) * 100.0 } else { 0.0 },
+            percentage: if total > 0 {
+                (count as f32 / total as f32) * 100.0
+            } else {
+                0.0
+            },
             count,
         })
         .collect();
@@ -110,18 +114,30 @@ pub async fn get_analytics(
         .into_iter()
         .map(|(license, count)| LicenseStats {
             license,
-            percentage: if total > 0 { (count as f32 / total as f32) * 100.0 } else { 0.0 },
+            percentage: if total > 0 {
+                (count as f32 / total as f32) * 100.0
+            } else {
+                0.0
+            },
             count,
         })
         .collect();
     license_distribution.sort_by(|a, b| b.count.cmp(&a.count));
 
     // Calculate security stats from real vulnerabilities
-    let critical_vulns = vulnerabilities.iter()
+    let critical_vulns = vulnerabilities
+        .iter()
         .filter(|v| matches!(v.severity, crate::models::VulnerabilitySeverity::Critical))
         .count() as u64;
-    let minor_issues = vulnerabilities.iter()
-        .filter(|v| matches!(v.severity, crate::models::VulnerabilitySeverity::Low | crate::models::VulnerabilitySeverity::Medium))
+    let minor_issues = vulnerabilities
+        .iter()
+        .filter(|v| {
+            matches!(
+                v.severity,
+                crate::models::VulnerabilitySeverity::Low
+                    | crate::models::VulnerabilitySeverity::Medium
+            )
+        })
         .count() as u64;
 
     let security_overview = SecurityStats {
@@ -139,7 +155,7 @@ pub async fn get_analytics(
         .map(|pkg| TrendingPackage {
             name: pkg.name.clone(),
             description: pkg.description.clone().unwrap_or_default(),
-            growth_percentage: 0.0,  // No historical data yet
+            growth_percentage: 0.0, // No historical data yet
             category: pkg.platform.clone().unwrap_or_else(|| "other".to_string()),
         })
         .collect();
@@ -148,12 +164,12 @@ pub async fn get_analytics(
         total_packages: total,
         active_maintainers: unique_maintainers.len() as u64,
         programming_languages: language_distribution.len() as u64,
-        weekly_updates: 0,  // Would need historical tracking
+        weekly_updates: 0, // Would need historical tracking
         language_distribution,
         license_distribution,
         trending_packages,
         security_overview,
-        growth_data: vec![],  // Would need historical tracking
+        growth_data: vec![], // Would need historical tracking
     };
 
     Ok(Json(analytics))
@@ -162,7 +178,9 @@ pub async fn get_analytics(
 pub async fn get_language_trends(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<LanguageStats>>, StatusCode> {
-    let packages = state.db.get_all_packages()
+    let packages = state
+        .db
+        .get_all_packages()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let total = packages.len() as u64;
@@ -178,7 +196,11 @@ pub async fn get_language_trends(
         .into_iter()
         .map(|(lang, count)| LanguageStats {
             language: lang,
-            percentage: if total > 0 { (count as f32 / total as f32) * 100.0 } else { 0.0 },
+            percentage: if total > 0 {
+                (count as f32 / total as f32) * 100.0
+            } else {
+                0.0
+            },
             count,
         })
         .collect();
@@ -190,17 +212,29 @@ pub async fn get_language_trends(
 pub async fn get_security_report(
     State(state): State<AppState>,
 ) -> Result<Json<SecurityStats>, StatusCode> {
-    let packages = state.db.get_all_packages()
+    let packages = state
+        .db
+        .get_all_packages()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let vulnerabilities = state.db.get_all_vulnerabilities()
+    let vulnerabilities = state
+        .db
+        .get_all_vulnerabilities()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let total = packages.len() as u64;
-    let critical_vulns = vulnerabilities.iter()
+    let critical_vulns = vulnerabilities
+        .iter()
         .filter(|v| matches!(v.severity, crate::models::VulnerabilitySeverity::Critical))
         .count() as u64;
-    let minor_issues = vulnerabilities.iter()
-        .filter(|v| matches!(v.severity, crate::models::VulnerabilitySeverity::Low | crate::models::VulnerabilitySeverity::Medium))
+    let minor_issues = vulnerabilities
+        .iter()
+        .filter(|v| {
+            matches!(
+                v.severity,
+                crate::models::VulnerabilitySeverity::Low
+                    | crate::models::VulnerabilitySeverity::Medium
+            )
+        })
         .count() as u64;
 
     let security_stats = SecurityStats {
@@ -216,15 +250,25 @@ pub async fn get_security_report(
 pub async fn get_db_stats(
     State(state): State<AppState>,
 ) -> Result<Json<DatabaseStats>, StatusCode> {
-    let packages = state.db.get_all_packages()
+    let packages = state
+        .db
+        .get_all_packages()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let versions = state.db.get_all_versions()
+    let versions = state
+        .db
+        .get_all_versions()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let users = state.db.get_all_users()
+    let users = state
+        .db
+        .get_all_users()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let vulnerabilities = state.db.get_all_vulnerabilities()
+    let vulnerabilities = state
+        .db
+        .get_all_vulnerabilities()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let timeline_events = state.db.get_all_timeline_events()
+    let timeline_events = state
+        .db
+        .get_all_timeline_events()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let stats = DatabaseStats {

@@ -287,7 +287,9 @@ pub fn RegisterModal(show: Signal<bool>) -> Element {
                     password_touched.set(false);
                 }
                 Err(e) => {
-                    let err_msg = e.as_string().unwrap_or_else(|| "Registration failed".to_string());
+                    let err_msg = e
+                        .as_string()
+                        .unwrap_or_else(|| "Registration failed".to_string());
                     form_error.set(Some(err_msg));
                 }
             }

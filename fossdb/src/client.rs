@@ -8,7 +8,13 @@ use std::sync::Arc;
 #[allow(dead_code)]
 pub struct RateLimitedClient {
     client: Client,
-    limiter: Arc<RateLimiter<governor::state::direct::NotKeyed, governor::state::InMemoryState, governor::clock::DefaultClock>>,
+    limiter: Arc<
+        RateLimiter<
+            governor::state::direct::NotKeyed,
+            governor::state::InMemoryState,
+            governor::clock::DefaultClock,
+        >,
+    >,
 }
 
 #[allow(dead_code)]
@@ -123,7 +129,15 @@ impl Default for AdaptiveConfig {
 #[derive(Clone)]
 pub struct AdaptiveRateLimitedClient {
     client: Client,
-    limiter: Arc<tokio::sync::RwLock<RateLimiter<governor::state::direct::NotKeyed, governor::state::InMemoryState, governor::clock::DefaultClock>>>,
+    limiter: Arc<
+        tokio::sync::RwLock<
+            RateLimiter<
+                governor::state::direct::NotKeyed,
+                governor::state::InMemoryState,
+                governor::clock::DefaultClock,
+            >,
+        >,
+    >,
     config: Arc<AdaptiveConfig>,
     current_rate: Arc<tokio::sync::RwLock<u32>>,
 }
@@ -235,9 +249,17 @@ impl AdaptiveRateLimitedClient {
             *limiter = RateLimiter::direct(quota);
 
             match status_code {
-                429 => tracing::warn!("Rate limit hit (429), decreasing rate to {} req/s", new_rate),
-                500..=599 => tracing::debug!("Server error, slightly decreasing rate to {} req/s", new_rate),
-                200..=299 => tracing::debug!("Successful response, increasing rate to {} req/s", new_rate),
+                429 => tracing::warn!(
+                    "Rate limit hit (429), decreasing rate to {} req/s",
+                    new_rate
+                ),
+                500..=599 => tracing::debug!(
+                    "Server error, slightly decreasing rate to {} req/s",
+                    new_rate
+                ),
+                200..=299 => {
+                    tracing::debug!("Successful response, increasing rate to {} req/s", new_rate)
+                }
                 _ => {}
             }
         }
