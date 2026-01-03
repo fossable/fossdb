@@ -4,6 +4,7 @@ use crates_io_api::{AsyncClient, Sort};
 use std::sync::Arc;
 
 use crate::collector_models::Collector;
+use crate::collectors::helpers;
 
 pub struct CratesIoCollector {
     client: Arc<AsyncClient>,
@@ -158,6 +159,30 @@ impl Collector for CratesIoCollector {
                             Ok(full_crate) => {
                                 let now = Utc::now();
 
+                                // Get the license from the latest version
+                                let license = full_crate
+                                    .versions
+                                    .first()
+                                    .and_then(|v| v.license.clone());
+
+                                // Skip packages with non-free licenses
+                                if let Some(ref lic) = license {
+                                    if !helpers::is_free_license(lic) {
+                                        tracing::info!(
+                                            "Skipping package {} with non-free license: {}",
+                                            crate_name_for_log,
+                                            lic
+                                        );
+                                        continue;
+                                    }
+                                } else {
+                                    tracing::info!(
+                                        "Skipping package {} with no license information",
+                                        crate_name_for_log
+                                    );
+                                    continue;
+                                }
+
                                 // Create and save the package using data from both search result and full details
                                 let package = Package {
                                     id: 0, // Will be auto-generated
@@ -165,10 +190,7 @@ impl Collector for CratesIoCollector {
                                     description: full_crate.description.clone(),
                                     homepage: full_crate.homepage.clone(),
                                     repository: full_crate.repository.clone(),
-                                    license: full_crate
-                                        .versions
-                                        .first()
-                                        .and_then(|v| v.license.clone()),
+                                    license,
                                     maintainers: Vec::new(), // crates_io_api doesn't expose maintainers easily
                                     tags: vec!["rust".to_string(), "crate".to_string()],
                                     created_at: now,

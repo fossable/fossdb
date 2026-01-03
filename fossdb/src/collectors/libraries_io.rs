@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::client::{AdaptiveConfig, AdaptiveRateLimitedClient};
 use crate::collector_models::{CollectedPackage, CollectedVersion, Collector, Dependency};
+use crate::collectors::helpers;
 
 pub struct LibrariesIoCollector {
     client: AdaptiveRateLimitedClient,
@@ -198,6 +199,24 @@ impl LibrariesIoCollector {
 
                 if let Some(status) = &project_details.status {
                     tags.push(format!("status:{}", status.to_lowercase()));
+                }
+
+                // Skip packages with non-free licenses
+                if let Some(ref lic) = project_details.licenses {
+                    if !helpers::is_free_license(lic) {
+                        tracing::info!(
+                            "Skipping package {} with non-free license: {}",
+                            project_details.name,
+                            lic
+                        );
+                        continue;
+                    }
+                } else {
+                    tracing::info!(
+                        "Skipping package {} with no license information",
+                        project_details.name
+                    );
+                    continue;
                 }
 
                 let package = CollectedPackage {

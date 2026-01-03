@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::process::Command;
 
 use crate::collector_models::Collector;
+use crate::collectors::helpers;
 
 #[derive(Debug, Deserialize)]
 struct NixSearchResult {
@@ -232,6 +233,24 @@ impl Collector for NixpkgsCollector {
 
                     // Extract homepage
                     let homepage = package_meta.as_ref().and_then(|m| m.meta.homepage.clone());
+
+                    // Skip packages with non-free licenses
+                    if let Some(ref lic) = license {
+                        if !helpers::is_free_license(lic) {
+                            tracing::info!(
+                                "Skipping package {} with non-free license: {}",
+                                package_name,
+                                lic
+                            );
+                            continue;
+                        }
+                    } else {
+                        tracing::info!(
+                            "Skipping package {} with no license information",
+                            package_name
+                        );
+                        continue;
+                    }
 
                     // Create the package
                     let package = Package {

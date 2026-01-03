@@ -123,3 +123,107 @@ impl VersionData {
         self
     }
 }
+
+/// Check if a license string represents a free/open source license
+/// Returns true if the license is free/open source, false if proprietary or unknown
+pub fn is_free_license(license: &str) -> bool {
+    // Normalize license string: lowercase and remove common separators
+    let normalized = license.to_lowercase();
+
+    // List of known free/open source licenses and their variations
+    // Based on OSI-approved licenses and FSF free software licenses
+    let free_licenses = [
+        // Permissive licenses
+        "mit", "apache", "apache-2.0", "apache 2.0", "bsd", "isc", "cc0",
+        "unlicense", "wtfpl", "0bsd", "bsl-1.0", "ncsa", "zlib", "x11",
+
+        // Copyleft licenses
+        "gpl", "lgpl", "agpl", "mpl", "epl", "cpl", "cddl", "cecill",
+        "eupl", "osl", "afl", "artistic",
+
+        // Creative Commons free licenses
+        "cc-by", "cc-by-sa",
+
+        // Public domain
+        "public domain", "publicdomain", "unlicensed",
+    ];
+
+    // Known non-free keywords
+    let non_free_keywords = [
+        "proprietary", "commercial", "private", "closed",
+        "all rights reserved", "copyright only",
+        // Non-free Creative Commons licenses
+        "cc-by-nd", "cc-by-nc",
+    ];
+
+    // Check for non-free keywords first
+    for keyword in &non_free_keywords {
+        if normalized.contains(keyword) {
+            return false;
+        }
+    }
+
+    // Check if it matches any known free license
+    for free_license in &free_licenses {
+        if normalized.contains(free_license) {
+            return true;
+        }
+    }
+
+    // Handle SPDX-style "OR" expressions - if any part is free, consider it free
+    if normalized.contains(" or ") || normalized.contains("/") {
+        let parts: Vec<&str> = normalized.split(&[' ', '/', '|'][..]).collect();
+        for part in parts {
+            let part = part.trim();
+            if part.is_empty() || part == "or" {
+                continue;
+            }
+            for free_license in &free_licenses {
+                if part.contains(free_license) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // If unknown, log it and reject for safety
+    tracing::warn!("Unknown license, treating as non-free: {}", license);
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_free_license() {
+        // Common permissive licenses
+        assert!(is_free_license("MIT"));
+        assert!(is_free_license("mit"));
+        assert!(is_free_license("Apache-2.0"));
+        assert!(is_free_license("apache 2.0"));
+        assert!(is_free_license("BSD-3-Clause"));
+        assert!(is_free_license("ISC"));
+
+        // Copyleft licenses
+        assert!(is_free_license("GPL-3.0"));
+        assert!(is_free_license("LGPL-2.1"));
+        assert!(is_free_license("AGPL-3.0"));
+        assert!(is_free_license("MPL-2.0"));
+
+        // SPDX OR expressions
+        assert!(is_free_license("MIT OR Apache-2.0"));
+        assert!(is_free_license("GPL-2.0/GPL-3.0"));
+
+        // Non-free licenses
+        assert!(!is_free_license("proprietary"));
+        assert!(!is_free_license("Commercial"));
+        assert!(!is_free_license("All Rights Reserved"));
+        assert!(!is_free_license("CC-BY-NC"));
+        assert!(!is_free_license("CC-BY-ND"));
+
+        // Unknown licenses (should be rejected)
+        assert!(!is_free_license("CustomLicense"));
+        assert!(!is_free_license(""));
+    }
+}

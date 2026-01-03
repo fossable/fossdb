@@ -1,7 +1,11 @@
 [package]
 name = "fossdb-client"
+description = "FossDB client"
 version.workspace = true
 edition.workspace = true
+authors = ["cilki"]
+repository = "https://github.com/fossable/fossdb/"
+license = "Unlicense"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
