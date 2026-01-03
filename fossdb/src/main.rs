@@ -212,6 +212,28 @@ async fn start_server(config: Config, no_collectors: bool) -> Result<()> {
         if !config.email_enabled {
             info!("Email disabled, notification processor not started");
         }
+
+        // Spawn timeline event purge task
+        let purge_db = db.clone();
+        let retention_days = config.timeline_retention_days;
+        tokio::spawn(async move {
+            loop {
+                // Run purge daily
+                tokio::time::sleep(tokio::time::Duration::from_secs(24 * 60 * 60)).await;
+
+                info!("Running timeline event purge (retention: {} days)", retention_days);
+                match purge_db.purge_old_timeline_events(chrono::Duration::days(retention_days as i64)) {
+                    Ok(count) => {
+                        if count > 0 {
+                            info!("Successfully purged {} old timeline events", count);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to purge old timeline events: {}", e);
+                    }
+                }
+            }
+        });
     }
 
     #[cfg(feature = "collector")]

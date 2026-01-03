@@ -37,6 +37,10 @@ impl Collector for CratesIoCollector {
         use chrono::Utc;
         use std::collections::HashSet;
 
+        // In debug mode, limit to 5 packages total
+        let mut packages_processed = 0;
+        let max_packages = if cfg!(debug_assertions) { 5 } else { usize::MAX };
+
         // Scrape first 3 pages of recently updated crates
         for page in 1..=3 {
             let mut query = crates_io_api::CratesQuery::builder()
@@ -191,7 +195,6 @@ impl Collector for CratesIoCollector {
                                     homepage: full_crate.homepage.clone(),
                                     repository: full_crate.repository.clone(),
                                     license,
-                                    maintainers: Vec::new(), // crates_io_api doesn't expose maintainers easily
                                     tags: vec!["rust".to_string(), "crate".to_string()],
                                     created_at: now,
                                     updated_at: krate.updated_at, // Use timestamp from search result
@@ -266,6 +269,15 @@ impl Collector for CratesIoCollector {
                     Err(e) => {
                         tracing::error!("Failed to check if package {} exists: {}", crate_name, e);
                     }
+                }
+
+                // Increment counter and check limit
+                packages_processed += 1;
+                if packages_processed >= max_packages {
+                    if cfg!(debug_assertions) {
+                        tracing::info!("Debug mode: Reached limit of {} packages, stopping collection", max_packages);
+                    }
+                    return Ok(());
                 }
             }
 

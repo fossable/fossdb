@@ -88,7 +88,6 @@ pub async fn create_package(
         homepage: payload.homepage,
         repository: payload.repository,
         license: payload.license,
-        maintainers: payload.maintainers,
         tags: payload.tags,
         created_at: now,
         updated_at: now,

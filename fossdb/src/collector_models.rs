@@ -11,7 +11,6 @@ pub struct CollectedPackage {
     pub homepage: Option<String>,
     pub repository: Option<String>,
     pub license: Option<String>,
-    pub maintainers: Vec<String>,
     pub tags: Vec<String>,
     pub versions: Vec<CollectedVersion>,
     pub platform: Option<String>,

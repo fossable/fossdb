@@ -31,7 +31,6 @@ struct NixMetaInfo {
     description: Option<String>,
     homepage: Option<String>,
     license: Option<NixLicense>,
-    maintainers: Option<Vec<NixMaintainer>>,
     changelog: Option<String>,
 }
 
@@ -50,13 +49,6 @@ struct NixLicenseInfo {
     full_name: Option<String>,
     #[serde(rename = "spdxId")]
     spdx_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NixMaintainer {
-    email: Option<String>,
-    github: Option<String>,
-    name: Option<String>,
 }
 
 pub struct NixpkgsCollector {}
@@ -137,6 +129,10 @@ impl Collector for NixpkgsCollector {
 
         tracing::info!("Starting nixpkgs collection...");
 
+        // In debug mode, limit to 5 packages total
+        let mut packages_processed = 0;
+        let max_packages = if cfg!(debug_assertions) { 5 } else { usize::MAX };
+
         // Search for packages
         let packages = self.search_packages().await?;
 
@@ -172,27 +168,6 @@ impl Collector for NixpkgsCollector {
                     };
 
                     let now = Utc::now();
-
-                    // Extract maintainers
-                    let maintainers = if let Some(ref meta) = package_meta {
-                        meta.meta
-                            .maintainers
-                            .as_ref()
-                            .map(|m| {
-                                m.iter()
-                                    .filter_map(|maintainer| {
-                                        maintainer
-                                            .name
-                                            .clone()
-                                            .or_else(|| maintainer.github.clone())
-                                            .or_else(|| maintainer.email.clone())
-                                    })
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default()
-                    } else {
-                        Vec::new()
-                    };
 
                     // Extract license
                     let license = if let Some(ref meta) = package_meta {
@@ -260,7 +235,6 @@ impl Collector for NixpkgsCollector {
                         homepage,
                         repository: None, // Nixpkgs doesn't directly expose repository URLs
                         license,
-                        maintainers,
                         tags: vec!["nix".to_string(), "nixpkgs".to_string()],
                         created_at: now,
                         updated_at: now,
@@ -321,6 +295,15 @@ impl Collector for NixpkgsCollector {
                 Err(e) => {
                     tracing::error!("Failed to check if package {} exists: {}", package_name, e);
                 }
+            }
+
+            // Increment counter and check limit
+            packages_processed += 1;
+            if packages_processed >= max_packages {
+                if cfg!(debug_assertions) {
+                    tracing::info!("Debug mode: Reached limit of {} packages, stopping collection", max_packages);
+                }
+                break;
             }
         }
 

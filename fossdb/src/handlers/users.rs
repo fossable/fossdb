@@ -45,7 +45,7 @@ pub async fn get_timeline(
     claims: Option<Extension<Claims>>,
 ) -> Result<Json<Value>, StatusCode> {
     // If user is logged in, return their personal timeline (paginated)
-    // Otherwise, return the global timeline (limited to 50)
+    // Otherwise, return the global timeline (generated dynamically from recent versions)
     let is_authenticated = claims.is_some();
     let mut db_events = if let Some(Extension(claims)) = claims {
         // User is logged in - get their personal timeline
@@ -56,17 +56,39 @@ pub async fn get_timeline(
             .get_timeline_events_by_user(user_id)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     } else {
-        // No user logged in - get global timeline (events with user_id = None)
-        let all_events = state
+        // No user logged in - generate global timeline dynamically from recent package versions
+        use crate::{TimelineEvent, EventType};
+
+        let mut versions = state
             .db
-            .get_all_timeline_events()
+            .get_all_versions()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        // Filter to only global events (user_id is None) and limit to 50
-        all_events
+        // Sort by release date (most recent first)
+        versions.sort_by(|a, b| b.release_date.cmp(&a.release_date));
+
+        // Take the 50 most recent versions and convert to timeline events
+        versions
             .into_iter()
-            .filter(|event| event.user_id.is_none())
             .take(50)
+            .filter_map(|version| {
+                // Get package name
+                state.db.get_package(version.package_id).ok()?.map(|package| {
+                    let version_str = version.version.clone();
+                    TimelineEvent {
+                        id: 0,
+                        package_id: package.id,
+                        user_id: None,
+                        event_type: EventType::NewRelease,
+                        package_name: package.name,
+                        version: Some(version.version),
+                        message: format!("New version {} released", version_str),
+                        metadata: None,
+                        created_at: version.release_date,
+                        notified_at: None,
+                    }
+                })
+            })
             .collect()
     };
 

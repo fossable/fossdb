@@ -225,7 +225,6 @@ impl LibrariesIoCollector {
                     homepage: project_details.homepage,
                     repository: project_details.repository_url,
                     license: project_details.licenses,
-                    maintainers: Vec::new(), // Libraries.io doesn't provide maintainer info in basic API
                     tags,
                     versions,
                     platform: Some(project_details.platform),
@@ -253,6 +252,10 @@ impl Collector for LibrariesIoCollector {
         use crate::{Package, PackageVersion};
         use std::collections::HashSet;
 
+        // In debug mode, limit to 5 packages total
+        let mut packages_processed = 0;
+        let max_packages = if cfg!(debug_assertions) { 5 } else { usize::MAX };
+
         // Get list of supported platforms
         let platforms = self.get_platforms().await?;
 
@@ -267,7 +270,7 @@ impl Collector for LibrariesIoCollector {
             "RubyGems",
         ];
 
-        for platform in platforms {
+        'platform_loop: for platform in platforms {
             if priority_platforms.contains(&platform.name.as_str()) {
                 tracing::info!("Scraping libraries.io platform: {}", platform.name);
 
@@ -355,7 +358,6 @@ impl Collector for LibrariesIoCollector {
                                         homepage: package_data.homepage,
                                         repository: package_data.repository,
                                         license: package_data.license,
-                                        maintainers: package_data.maintainers,
                                         tags: package_data.tags,
                                         created_at: now,
                                         updated_at: now,
@@ -417,6 +419,15 @@ impl Collector for LibrariesIoCollector {
                                         e
                                     );
                                 }
+                            }
+
+                            // Increment counter and check limit
+                            packages_processed += 1;
+                            if packages_processed >= max_packages {
+                                if cfg!(debug_assertions) {
+                                    tracing::info!("Debug mode: Reached limit of {} packages, stopping collection", max_packages);
+                                }
+                                break 'platform_loop;
                             }
                         }
                     }

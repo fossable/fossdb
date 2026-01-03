@@ -15,7 +15,6 @@ pub struct DatabaseStats {
 #[derive(Serialize)]
 pub struct AnalyticsResponse {
     pub total_packages: u64,
-    pub active_maintainers: u64,
     pub programming_languages: u64,
     pub weekly_updates: u64,
     pub language_distribution: Vec<LanguageStats>,
@@ -80,7 +79,6 @@ pub async fn get_analytics(
     // Calculate language distribution from actual packages
     let mut language_counts = std::collections::HashMap::new();
     let mut license_counts = std::collections::HashMap::new();
-    let mut unique_maintainers = std::collections::HashSet::new();
 
     for pkg in &packages {
         if let Some(lang) = &pkg.language {
@@ -88,9 +86,6 @@ pub async fn get_analytics(
         }
         if let Some(license) = &pkg.license {
             *license_counts.entry(license.clone()).or_insert(0) += 1;
-        }
-        for maintainer in &pkg.maintainers {
-            unique_maintainers.insert(maintainer.clone());
         }
     }
 
@@ -162,7 +157,6 @@ pub async fn get_analytics(
 
     let analytics = AnalyticsResponse {
         total_packages: total,
-        active_maintainers: unique_maintainers.len() as u64,
         programming_languages: language_distribution.len() as u64,
         weekly_updates: 0, // Would need historical tracking
         language_distribution,

@@ -120,7 +120,7 @@ async fn handle_package_version_event(
         }
     }
 
-    // Create global timeline event for public timeline
+    // Broadcast a global event to WebSocket clients (not stored in database)
     let global_event = TimelineEvent {
         id: 0,
         package_id: package.id,
@@ -134,25 +134,13 @@ async fn handle_package_version_event(
         notified_at: None,
     };
 
-    match db.insert_timeline_event(global_event) {
-        Ok(saved_event) => {
-            // Broadcast the global event to connected WebSocket clients
-            broadcaster.broadcast(saved_event);
-            tracing::info!(
-                "Created global timeline event for {} {}",
-                package.name,
-                version.version
-            );
-        }
-        Err(e) => {
-            tracing::error!(
-                "Failed to create global timeline event for {} {}: {}",
-                package.name,
-                version.version,
-                e
-            );
-        }
-    }
+    // Broadcast the global event to connected WebSocket clients
+    broadcaster.broadcast(global_event);
+    tracing::info!(
+        "Broadcast global timeline event for {} {}",
+        package.name,
+        version.version
+    );
 
     Ok(())
 }

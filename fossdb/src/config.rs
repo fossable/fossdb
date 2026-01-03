@@ -8,6 +8,7 @@ pub struct Config {
     pub server_port: u16,
     pub libraries_io_api_key: Option<String>,
     pub collector_interval_hours: u64,
+    pub timeline_retention_days: u64,
     pub smtp_host: String,
     pub smtp_port: u16,
     pub smtp_username: String,
@@ -36,6 +37,10 @@ impl Config {
                 .unwrap_or_else(|_| "1".to_string())
                 .parse()
                 .unwrap_or(1),
+            timeline_retention_days: env::var("TIMELINE_RETENTION_DAYS")
+                .unwrap_or_else(|_| "90".to_string())
+                .parse()
+                .unwrap_or(90),
             smtp_host: env::var("SMTP_HOST").unwrap_or_else(|_| "localhost".to_string()),
             smtp_port: env::var("SMTP_PORT")
                 .unwrap_or_else(|_| "587".to_string())

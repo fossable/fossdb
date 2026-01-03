@@ -283,4 +283,44 @@ impl Database {
             .map(|u| u.id)
             .collect())
     }
+
+    /// Purge timeline events older than the specified duration
+    /// Returns the number of events deleted
+    pub fn purge_old_timeline_events(&self, older_than: chrono::Duration) -> Result<usize> {
+        use chrono::Utc;
+
+        let cutoff_time = Utc::now() - older_than;
+        let r = self.db.r_transaction()?;
+
+        // Get all timeline events
+        let all_events: Vec<TimelineEvent> = r
+            .scan()
+            .primary()?
+            .all()?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Filter events older than cutoff time
+        let events_to_delete: Vec<TimelineEvent> = all_events
+            .into_iter()
+            .filter(|event| event.created_at < cutoff_time)
+            .collect();
+
+        let delete_count = events_to_delete.len();
+
+        if delete_count > 0 {
+            drop(r); // Drop read transaction before starting write transaction
+            let rw = self.db.rw_transaction()?;
+
+            for event in events_to_delete {
+                rw.remove(event)?;
+            }
+
+            rw.commit()?;
+            tracing::info!("Purged {} old timeline events older than {}", delete_count, cutoff_time);
+        } else {
+            tracing::debug!("No timeline events to purge (cutoff: {})", cutoff_time);
+        }
+
+        Ok(delete_count)
+    }
 }

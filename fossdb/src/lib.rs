@@ -66,7 +66,6 @@ db_model! {
         pub homepage: Option<String>,
         pub repository: Option<String>,
         pub license: Option<String>,
-        pub maintainers: Vec<String>,
         pub tags: Vec<String>,
         pub created_at: DateTime<Utc>,
         pub updated_at: DateTime<Utc>,
@@ -201,7 +200,6 @@ pub struct CreatePackageRequest {
     pub homepage: Option<String>,
     pub repository: Option<String>,
     pub license: Option<String>,
-    pub maintainers: Vec<String>,
     pub tags: Vec<String>,
 }
 
