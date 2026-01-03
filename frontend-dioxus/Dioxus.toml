@@ -1,0 +1,19 @@
+[application]
+name = "frontend-dioxus"
+default_platform = "web"
+
+[web.app]
+title = "FossDB - Open Source Software Database"
+base_path = "/"
+
+[web.watcher]
+
+[web.resource]
+style = ["src/styles.css"]
+
+[web.resource.dev]
+
+[web.resource.release]
+
+[[web.proxy]]
+backend = "http://localhost:3000/api"

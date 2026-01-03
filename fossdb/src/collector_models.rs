@@ -37,6 +37,5 @@ pub trait Collector: Send + Sync {
     async fn collect(
         &self,
         db: std::sync::Arc<crate::db::Database>,
-        broadcaster: std::sync::Arc<crate::websocket::TimelineBroadcaster>,
     ) -> anyhow::Result<()>;
 }

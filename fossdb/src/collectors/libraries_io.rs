@@ -201,8 +201,8 @@ impl Collector for LibrariesIoCollector {
         "libraries.io"
     }
 
-    async fn collect(&self, db: Arc<crate::db::Database>, broadcaster: Arc<crate::websocket::TimelineBroadcaster>) -> Result<()> {
-        use crate::models::{Package, PackageVersion, TimelineEvent, EventType};
+    async fn collect(&self, db: Arc<crate::db::Database>) -> Result<()> {
+        use crate::models::{Package, PackageVersion};
         use std::collections::HashSet;
 
         // Get list of supported platforms
@@ -263,50 +263,9 @@ impl Collector for LibrariesIoCollector {
                                                 created_at: now,
                                             };
 
+                                            // Timeline events will be created automatically by the database listener
                                             if db.insert_version(version).is_ok() {
                                                 tracing::info!("Saved new version {} for {}", version_data.version, package_data.name);
-
-                                                // Create timeline events for subscribed users
-                                                if let Ok(subscribed_users) = db.get_users_subscribed_to(&package_data.name) {
-                                                    for user_id in subscribed_users {
-                                                        let event = TimelineEvent {
-                                                            id: 0,
-                                                            package_id: existing_package.id,
-                                                            user_id: Some(user_id),
-                                                            event_type: EventType::NewRelease,
-                                                            package_name: package_data.name.clone(),
-                                                            version: Some(version_data.version.clone()),
-                                                            description: format!("New version {} released", version_data.version),
-                                                            created_at: now,
-                                                            notified_at: None,
-                                                        };
-
-                                                        if let Ok(saved_event) = db.insert_timeline_event(event) {
-                                                            // Broadcast the event to connected WebSocket clients
-                                                            broadcaster.broadcast(saved_event);
-                                                        } else {
-                                                            tracing::error!("Failed to create timeline event for user {}", user_id);
-                                                        }
-                                                    }
-                                                }
-
-                                                // Create global timeline event for public timeline
-                                                let global_event = TimelineEvent {
-                                                    id: 0,
-                                                    package_id: existing_package.id,
-                                                    user_id: None,
-                                                    event_type: EventType::NewRelease,
-                                                    package_name: package_data.name.clone(),
-                                                    version: Some(version_data.version.clone()),
-                                                    description: format!("New version {} released", version_data.version),
-                                                    created_at: now,
-                                                    notified_at: None,
-                                                };
-
-                                                if let Ok(saved_event) = db.insert_timeline_event(global_event) {
-                                                    // Broadcast the global event to connected WebSocket clients
-                                                    broadcaster.broadcast(saved_event);
-                                                }
                                             }
                                         }
                                     }

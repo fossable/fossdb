@@ -64,7 +64,7 @@ async fn register_user(
 
     Ok(Json(AuthResponse {
         token,
-        user_id: user.id.to_string(),
+        user,
     }))
 }
 
@@ -104,6 +104,6 @@ async fn login_user(
 
     Ok(Json(AuthResponse {
         token,
-        user_id: user.id.to_string(),
+        user,
     }))
 }

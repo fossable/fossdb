@@ -28,9 +28,9 @@ impl Collector for CratesIoCollector {
         "crates.io"
     }
 
-    async fn collect(&self, db: Arc<crate::db::Database>, broadcaster: Arc<crate::websocket::TimelineBroadcaster>) -> Result<()> {
+    async fn collect(&self, db: Arc<crate::db::Database>) -> Result<()> {
         use chrono::Utc;
-        use crate::models::{Package, PackageVersion, TimelineEvent, EventType};
+        use crate::models::{Package, PackageVersion};
         use std::collections::HashSet;
 
         // Scrape first 3 pages of recently updated crates
@@ -106,51 +106,9 @@ impl Collector for CratesIoCollector {
                                             created_at: now,
                                         };
 
-                                        // Save version
+                                        // Save version - timeline events will be created automatically by the database listener
                                         if let Ok(_saved_version) = db.insert_version(version) {
                                             tracing::info!("Saved new version {} for {}", v.num, crate_name);
-
-                                            // Create timeline events for subscribed users
-                                            if let Ok(subscribed_users) = db.get_users_subscribed_to(&crate_name) {
-                                                for user_id in subscribed_users {
-                                                    let event = TimelineEvent {
-                                                        id: 0,
-                                                        package_id: existing_package.id,
-                                                        user_id: Some(user_id),
-                                                        event_type: EventType::NewRelease,
-                                                        package_name: crate_name.clone(),
-                                                        version: Some(v.num.clone()),
-                                                        description: format!("New version {} released", v.num),
-                                                        created_at: now,
-                                                        notified_at: None,
-                                                    };
-
-                                                    if let Ok(saved_event) = db.insert_timeline_event(event) {
-                                                        // Broadcast the event to connected WebSocket clients
-                                                        broadcaster.broadcast(saved_event);
-                                                    } else {
-                                                        tracing::error!("Failed to create timeline event for user {}", user_id);
-                                                    }
-                                                }
-                                            }
-
-                                            // Create global timeline event for public timeline
-                                            let global_event = TimelineEvent {
-                                                id: 0,
-                                                package_id: existing_package.id,
-                                                user_id: None,
-                                                event_type: EventType::NewRelease,
-                                                package_name: crate_name.clone(),
-                                                version: Some(v.num.clone()),
-                                                description: format!("New version {} released", v.num),
-                                                created_at: now,
-                                                notified_at: None,
-                                            };
-
-                                            if let Ok(saved_event) = db.insert_timeline_event(global_event) {
-                                                // Broadcast the global event to connected WebSocket clients
-                                                broadcaster.broadcast(saved_event);
-                                            }
                                         }
                                     }
                                 }
@@ -198,24 +156,6 @@ impl Collector for CratesIoCollector {
                                 match db.insert_package(package) {
                                     Ok(saved_package) => {
                                         tracing::info!("Saved package: {}", saved_package.name);
-
-                                        // Create global timeline event for new package
-                                        let global_event = TimelineEvent {
-                                            id: 0,
-                                            package_id: saved_package.id,
-                                            user_id: None, // Global event
-                                            event_type: EventType::PackageAdded,
-                                            package_name: saved_package.name.clone(),
-                                            version: None,
-                                            description: format!("New package {} added to FossDB", saved_package.name),
-                                            created_at: now,
-                                            notified_at: None,
-                                        };
-
-                                        if let Ok(saved_event) = db.insert_timeline_event(global_event) {
-                                            // Broadcast the global event to connected WebSocket clients
-                                            broadcaster.broadcast(saved_event);
-                                        }
 
                                         // Save versions (up to 10 non-yanked versions)
                                         for v in full_crate.versions.iter()

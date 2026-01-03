@@ -8,6 +8,29 @@ use serde_json::Value;
 
 use crate::{AppState, auth::Claims, models::PackageSubscription};
 
+/// Convert database TimelineEvent to API TimelineEvent
+fn convert_timeline_event(db_event: &crate::models::TimelineEvent) -> crate::TimelineEvent {
+    use crate::models::EventType;
+    use crate::TimelineEventType;
+
+    let event_type = match db_event.event_type {
+        EventType::NewRelease => TimelineEventType::NewRelease,
+        EventType::SecurityAlert => TimelineEventType::SecurityAlert,
+        EventType::PackageAdded => TimelineEventType::PackageAdded,
+        EventType::PackageUpdated => TimelineEventType::PackageUpdated,
+    };
+
+    crate::TimelineEvent {
+        id: db_event.id,
+        event_type,
+        package_name: db_event.package_name.clone(),
+        version: db_event.version.clone(),
+        message: db_event.description.clone(),
+        metadata: None,
+        created_at: db_event.created_at,
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SubscriptionRequest {
     pub package_name: String,
@@ -47,7 +70,7 @@ pub async fn get_timeline(
     // If user is logged in, return their personal timeline (paginated)
     // Otherwise, return the global timeline (limited to 50)
     let is_authenticated = claims.is_some();
-    let mut events = if let Some(Extension(claims)) = claims {
+    let mut db_events = if let Some(Extension(claims)) = claims {
         // User is logged in - get their personal timeline
         let user_id: u64 = claims.sub.parse()
             .map_err(|_| StatusCode::BAD_REQUEST)?;
@@ -67,26 +90,36 @@ pub async fn get_timeline(
     };
 
     // For personal timelines, apply pagination
-    let total = events.len();
+    let total = db_events.len();
     if is_authenticated {
         let limit = params.limit.unwrap_or(20).min(100);
         let offset = params.offset.unwrap_or(0);
 
-        events = events.into_iter()
+        db_events = db_events.into_iter()
             .skip(offset)
             .take(limit)
             .collect();
 
+        // Convert database events to API events
+        let api_events: Vec<crate::TimelineEvent> = db_events.iter()
+            .map(convert_timeline_event)
+            .collect();
+
         Ok(Json(serde_json::json!({
-            "events": events,
+            "events": api_events,
             "total": total,
             "limit": limit,
             "offset": offset
         })))
     } else {
+        // Convert database events to API events
+        let api_events: Vec<crate::TimelineEvent> = db_events.iter()
+            .map(convert_timeline_event)
+            .collect();
+
         // Global timeline - no pagination metadata
         Ok(Json(serde_json::json!({
-            "events": events
+            "events": api_events
         })))
     }
 }
