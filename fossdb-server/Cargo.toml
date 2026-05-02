@@ -1,0 +1,87 @@
+[package]
+name = "fossdb-server"
+description = "FossDB server"
+version.workspace = true
+edition.workspace = true
+authors = ["cilki"]
+repository = "https://github.com/fossable/fossdb/"
+license = "Unlicense"
+
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["api-server", "collector-rust", "collector-nixpkgs", "email"]
+db = ["dep:native_db", "dep:native_model"]
+api-server = [
+  "db",
+  "dep:tokio",
+  "dep:axum",
+  "dep:tower",
+  "dep:tower-http",
+  "dep:bcrypt",
+  "dep:jsonwebtoken",
+  "dep:tracing",
+  "dep:tracing-subscriber",
+  "dep:dotenvy",
+  "dep:tokio-util",
+  "dep:governor",
+]
+collector = ["db", "dep:tokio"]
+collector-rust = ["collector", "dep:reqwest", "dep:crates_io_api"]
+collector-nixpkgs = ["collector", "dep:reqwest"]
+collector-libraries-io = ["collector", "dep:reqwest"]
+email = ["dep:tokio", "dep:lettre", "dep:tera", "dep:once_cell"]
+
+[dependencies]
+# Workspace dependencies
+anyhow.workspace = true
+chrono.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+
+# fossdb-specific dependencies
+async-trait = "0.1"
+clap = { version = "4.5", features = ["derive"] }
+regex = "1.0"
+semver = "1.0"
+tokio = { version = "1.0", features = ["full"], optional = true }
+
+# API server dependencies
+axum = { version = "0.8.8", features = ["ws"], optional = true }
+tower = { version = "0.5.2", optional = true }
+tower-http = { version = "0.6.8", features = ["cors", "fs"], optional = true }
+bcrypt = { version = "0.17.1", optional = true }
+jsonwebtoken = { version = "10.2.0", features = [
+  "rust_crypto",
+], optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true }
+dotenvy = { version = "0.15", optional = true }
+tokio-util = { version = "0.7", optional = true }
+governor = { version = "0.10.4", optional = true }
+
+# Collector dependencies
+reqwest = { version = "0.13.1", default-features = false, features = [
+  "json",
+  "rustls",
+], optional = true }
+crates_io_api = { version = "0.12", default-features = false, features = [
+  "rustls",
+], optional = true }
+
+# Email dependencies
+lettre = { version = "0.11", default-features = false, features = [
+  "tokio1",
+  "tokio1-rustls-tls",
+  "smtp-transport",
+  "builder",
+], optional = true }
+tera = { version = "1.20", optional = true }
+once_cell = { version = "1.19", optional = true }
+
+# Database dependencies
+native_db = { version = "0.8.2", optional = true }
+native_model = { version = "0.4.20", optional = true }

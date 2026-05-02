@@ -1,5 +1,5 @@
 [package]
-name = "fossdb-client"
+name = "fossdb-web"
 description = "FossDB client"
 version.workspace = true
 edition.workspace = true
