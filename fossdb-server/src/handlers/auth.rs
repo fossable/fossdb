@@ -57,7 +57,7 @@ async fn register_user(
         .insert_user(user)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let token = create_jwt(&user.inner.id.to_string(), &user.inner.username)
+    let token = create_jwt(&user.id.to_string(), &user.username)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(AuthResponse {
@@ -92,14 +92,14 @@ async fn login_user(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let is_valid = verify_password(&password, &user.inner.password_hash)
+    let is_valid = verify_password(&password, &user.password_hash)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if !is_valid {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let token = create_jwt(&user.inner.id.to_string(), &user.inner.username)
+    let token = create_jwt(&user.id.to_string(), &user.username)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(AuthResponse {

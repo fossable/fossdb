@@ -16,6 +16,10 @@ pub struct Config {
     pub smtp_from_address: String,
     pub smtp_from_name: String,
     pub email_enabled: bool,
+    pub collector_port: u16,
+    pub collector_api_key: String,
+    pub worker_port: u16,
+    pub worker_api_key: String,
 }
 
 impl Config {
@@ -55,6 +59,18 @@ impl Config {
                 .unwrap_or_else(|_| "false".to_string())
                 .parse()
                 .unwrap_or(false),
+            collector_port: env::var("COLLECTOR_PORT")
+                .unwrap_or_else(|_| "3001".to_string())
+                .parse()
+                .unwrap_or(3001),
+            collector_api_key: env::var("COLLECTOR_API_KEY")
+                .expect("COLLECTOR_API_KEY environment variable must be set"),
+            worker_port: env::var("WORKER_PORT")
+                .unwrap_or_else(|_| "3002".to_string())
+                .parse()
+                .unwrap_or(3002),
+            worker_api_key: env::var("WORKER_API_KEY")
+                .expect("WORKER_API_KEY environment variable must be set"),
         }
     }
 }

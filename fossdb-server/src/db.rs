@@ -5,15 +5,16 @@ use std::sync::Arc;
 
 use crate::id_generator::IdGenerator;
 use crate::models::{
-    PackageKey, PackageVersionKey, TimelineEventKey, UserKey,
+    PackageKey, PackageVersionKey, TimelineEventKey, UserKey, WorkerAnalysisKey,
 };
+use crate::models::WorkerAnalysis;
 use crate::*;
 
 macro_rules! impl_insert {
     ($method:ident, $type:ty, $id_gen:ident) => {
         pub fn $method(&self, mut entity: $type) -> Result<$type> {
-            if entity.inner.id == 0 {
-                entity.inner.id = self.$id_gen.next();
+            if entity.id == 0 {
+                entity.id = self.$id_gen.next();
             }
             let rw = self.db.rw_transaction()?;
             rw.insert(entity.clone())?;
@@ -24,8 +25,8 @@ macro_rules! impl_insert {
     (#[allow(dead_code)] $method:ident, $type:ty, $id_gen:ident) => {
         #[allow(dead_code)]
         pub fn $method(&self, mut entity: $type) -> Result<$type> {
-            if entity.inner.id == 0 {
-                entity.inner.id = self.$id_gen.next();
+            if entity.id == 0 {
+                entity.id = self.$id_gen.next();
             }
             let rw = self.db.rw_transaction()?;
             rw.insert(entity.clone())?;
@@ -65,7 +66,7 @@ macro_rules! impl_update {
     ($method:ident, $type:ty) => {
         pub fn $method(&self, entity: $type) -> Result<()> {
             let rw = self.db.rw_transaction()?;
-            if let Some(old) = rw.get().primary::<$type>(entity.inner.id)? {
+            if let Some(old) = rw.get().primary::<$type>(entity.id)? {
                 rw.remove(old)?;
             }
             rw.insert(entity)?;
@@ -80,7 +81,7 @@ macro_rules! find_max_id {
         $tx.scan()
             .primary::<$type>()?
             .all()?
-            .map(|e| e.map(|item| item.inner.id).unwrap_or(0))
+            .map(|e| e.map(|item| item.id).unwrap_or(0))
             .max()
             .unwrap_or(0)
     };
@@ -93,6 +94,7 @@ static MODELS: Lazy<Models> = Lazy::new(|| {
     models.define::<User>().unwrap();
     models.define::<Vulnerability>().unwrap();
     models.define::<TimelineEvent>().unwrap();
+    models.define::<WorkerAnalysis>().unwrap();
     models
 });
 
@@ -104,6 +106,7 @@ pub struct Database {
     #[allow(dead_code)]
     vulnerability_ids: Arc<IdGenerator>,
     timeline_ids: Arc<IdGenerator>,
+    analysis_ids: Arc<IdGenerator>,
 }
 
 impl Database {
@@ -117,6 +120,7 @@ impl Database {
         let max_user_id = find_max_id!(r, User);
         let max_vulnerability_id = find_max_id!(r, Vulnerability);
         let max_timeline_id = find_max_id!(r, TimelineEvent);
+        let max_analysis_id = find_max_id!(r, WorkerAnalysis);
 
         drop(r);
 
@@ -125,6 +129,7 @@ impl Database {
         let user_ids = Arc::new(IdGenerator::new(max_user_id + 1));
         let vulnerability_ids = Arc::new(IdGenerator::new(max_vulnerability_id + 1));
         let timeline_ids = Arc::new(IdGenerator::new(max_timeline_id + 1));
+        let analysis_ids = Arc::new(IdGenerator::new(max_analysis_id + 1));
 
         Ok(Self {
             db,
@@ -133,6 +138,7 @@ impl Database {
             user_ids,
             vulnerability_ids,
             timeline_ids,
+            analysis_ids,
         })
     }
 
@@ -249,9 +255,9 @@ impl Database {
         Ok(all_events
             .into_iter()
             .filter(|e| {
-                e.inner.user_id.is_some()
-                    && e.inner.notified_at.is_none()
-                    && e.inner.event_type == crate::EventType::NewRelease
+                e.user_id.is_some()
+                    && e.notified_at.is_none()
+                    && e.event_type == crate::EventType::NewRelease
             })
             .collect())
     }
@@ -261,13 +267,36 @@ impl Database {
         Ok(all_users
             .into_iter()
             .filter(|u| {
-                u.inner
-                    .subscriptions
+                u.subscriptions
                     .iter()
                     .any(|s| s.package_name == package_name && s.notifications_enabled)
             })
-            .map(|u| u.inner.id)
+            .map(|u| u.id)
             .collect())
+    }
+
+    impl_insert!(insert_worker_analysis, WorkerAnalysis, analysis_ids);
+    impl_get!(get_worker_analysis, WorkerAnalysis);
+    impl_get_all!(get_all_analyses, WorkerAnalysis);
+
+    pub fn get_analyses_by_package(&self, package_id: u64) -> Result<Vec<WorkerAnalysis>> {
+        let r = self.db.r_transaction()?;
+        let analyses: Vec<WorkerAnalysis> = r
+            .scan()
+            .secondary(WorkerAnalysisKey::package_id)?
+            .start_with(package_id)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(analyses)
+    }
+
+    pub fn get_analyses_by_version(&self, version_id: u64) -> Result<Vec<WorkerAnalysis>> {
+        let r = self.db.r_transaction()?;
+        let analyses: Vec<WorkerAnalysis> = r
+            .scan()
+            .secondary(WorkerAnalysisKey::version_id)?
+            .start_with(version_id)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(analyses)
     }
 
     pub fn purge_old_timeline_events(&self, older_than: chrono::Duration) -> Result<usize> {
@@ -284,7 +313,7 @@ impl Database {
 
         let events_to_delete: Vec<TimelineEvent> = all_events
             .into_iter()
-            .filter(|event| event.inner.created_at < cutoff_time)
+            .filter(|event| event.created_at < cutoff_time)
             .collect();
 
         let delete_count = events_to_delete.len();

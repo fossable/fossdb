@@ -32,10 +32,10 @@ impl NotificationProcessor {
 
         for mut event in pending_events {
             // Get the user for this event
-            let user_id = match event.inner.user_id {
+            let user_id = match event.user_id {
                 Some(id) => id,
                 None => {
-                    tracing::warn!("Event {} has no user_id, skipping", event.inner.id);
+                    tracing::warn!("Event {} has no user_id, skipping", event.id);
                     continue;
                 }
             };
@@ -46,7 +46,7 @@ impl NotificationProcessor {
                     tracing::warn!(
                         "User {} not found for event {}, skipping",
                         user_id,
-                        event.inner.id
+                        event.id
                     );
                     continue;
                 }
@@ -54,7 +54,7 @@ impl NotificationProcessor {
                     tracing::error!(
                         "Failed to get user {} for event {}: {}",
                         user_id,
-                        event.inner.id,
+                        event.id,
                         e
                     );
                     continue;
@@ -62,73 +62,68 @@ impl NotificationProcessor {
             };
 
             // Check if user has notifications enabled
-            if !user.inner.notifications_enabled {
+            if !user.notifications_enabled {
                 tracing::debug!(
                     "User {} has notifications disabled, skipping",
-                    user.inner.id
+                    user.id
                 );
                 notifications_skipped += 1;
                 continue;
             }
 
             // Get package details
-            let package = match self.db.get_package(event.inner.package_id) {
+            let package = match self.db.get_package(event.package_id) {
                 Ok(Some(p)) => p,
                 Ok(None) => {
                     tracing::warn!(
                         "Package {} not found for event {}, skipping",
-                        event.inner.package_id,
-                        event.inner.id
+                        event.package_id,
+                        event.id
                     );
                     continue;
                 }
                 Err(e) => {
                     tracing::error!(
                         "Failed to get package {} for event {}: {}",
-                        event.inner.package_id,
-                        event.inner.id,
+                        event.package_id,
+                        event.id,
                         e
                     );
                     continue;
                 }
             };
 
-            let version_string = "unknown".to_string();
-            let version = event.inner.version.as_ref().unwrap_or(&version_string);
-            let release_date = event
-                .inner
-                .created_at
-                .format("%Y-%m-%d %H:%M UTC")
-                .to_string();
+            let version = event.version.clone().unwrap_or_else(|| "unknown".to_string());
+            let release_date = event.created_at.format("%Y-%m-%d %H:%M UTC").to_string();
 
             // Send email
             match self
                 .email
                 .send_new_release_notification(
-                    &user.inner.email,
-                    &event.inner.package_name,
-                    version,
+                    &user.email,
+                    &event.package_name,
+                    &version,
                     &release_date,
-                    package.inner.description.as_deref(),
+                    package.description.as_deref(),
                 )
                 .await
             {
                 Ok(()) => {
                     // Mark notification as sent
-                    event.inner.notified_at = Some(Utc::now());
+                    event.notified_at = Some(Utc::now());
 
                     if let Err(e) = self.db.update_timeline_event(event.clone()) {
                         tracing::error!(
                             "Failed to update timeline event {}: {}",
-                            event.inner.id,
+                            event.id,
                             e
                         );
                     } else {
                         notifications_sent += 1;
                         tracing::info!(
                             "Sent notification to {} for {} {}",
-                            user.inner.email,
-                            event.inner.package_name,
+                            user.email,
+                            event.package_name,
                             version
                         );
                     }
@@ -136,8 +131,8 @@ impl NotificationProcessor {
                 Err(e) => {
                     tracing::error!(
                         "Failed to send email to {} for {} {}: {}",
-                        user.inner.email,
-                        event.inner.package_name,
+                        user.email,
+                        event.package_name,
                         version,
                         e
                     );

@@ -2,7 +2,7 @@ use anyhow::Result;
 use axum::{
     Router,
     response::Json,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use clap::Parser;
 use serde::Serialize;
@@ -14,15 +14,11 @@ use std::{
 use tower_http::cors::CorsLayer;
 use tracing::{error, info};
 
-// Import from the library
 use fossdb_server::{AppState, config::Config, db::Database, handlers, middleware};
 use fossdb_server::{Package, PackageVersion, User, Vulnerability, TimelineEvent};
 
 #[cfg(feature = "email")]
 use fossdb_server::{email, notifications};
-
-#[cfg(feature = "collector")]
-use fossdb_server::{collector_models, collectors};
 
 use fossdb_server::websocket;
 
@@ -33,40 +29,26 @@ use fossdb_server::websocket;
 struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
-
-    /// Disable background collectors (only for serve command)
-    #[arg(long, default_value_t = false)]
-    no_collectors: bool,
 }
 
 #[derive(clap::Subcommand, Debug)]
 enum Commands {
     /// Start the API server (default)
     #[cfg(feature = "api-server")]
-    Serve {
-        /// Disable background collectors
-        #[arg(long, default_value_t = false)]
-        no_collectors: bool,
-    },
+    Serve,
     /// Export database tables to JSON files
     #[cfg(feature = "db")]
     Export {
-        /// Output directory (default: current directory)
         #[arg(short, long, default_value = ".")]
         output_dir: PathBuf,
-
-        /// Specific table to export (packages, versions, users, vulnerabilities, timeline_events)
         #[arg(short, long)]
         table: Option<String>,
     },
     /// Import database table from JSON file
     #[cfg(feature = "db")]
     Import {
-        /// Input file path (e.g., packages.json)
         #[arg(short, long)]
         input: PathBuf,
-
-        /// Merge with existing data instead of replacing
         #[arg(long, default_value_t = false)]
         merge: bool,
     },
@@ -75,13 +57,11 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
-
     tracing_subscriber::fmt::init();
 
     let args = Args::parse();
     let config = Config::from_env();
 
-    // Handle subcommands
     match args.command {
         #[cfg(feature = "db")]
         Some(Commands::Export { output_dir, table }) => {
@@ -92,12 +72,12 @@ async fn main() -> Result<()> {
             return import_database(&config, input, merge).await;
         }
         #[cfg(feature = "api-server")]
-        Some(Commands::Serve { no_collectors }) => {
-            return start_server(config, no_collectors).await;
+        Some(Commands::Serve) => {
+            return start_server(config).await;
         }
         None => {
             #[cfg(feature = "api-server")]
-            return start_server(config, args.no_collectors).await;
+            return start_server(config).await;
             #[cfg(not(feature = "api-server"))]
             {
                 std::future::pending::<()>().await;
@@ -107,12 +87,10 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn start_server(config: Config, no_collectors: bool) -> Result<()> {
-    // Initialize native_db
+async fn start_server(config: Config) -> Result<()> {
     let db = Database::new(&config.database_path)?;
     let db = Arc::new(db);
 
-    // Log database statistics
     let num_packages = db.get_all_packages()?.len();
     let num_versions = db.get_all_versions()?.len();
     let num_users = db.get_all_users()?.len();
@@ -126,158 +104,126 @@ async fn start_server(config: Config, no_collectors: bool) -> Result<()> {
     info!("  Vulnerabilities: {}", num_vulnerabilities);
     info!("  Timeline Events: {}", num_timeline_events);
 
-    // Initialize timeline broadcaster
     let broadcaster = Arc::new(websocket::TimelineBroadcaster::new());
 
-    // Initialize database listener for automatic timeline event creation
-    #[cfg(feature = "collector")]
-    if !no_collectors {
-        if let Err(e) =
-            fossdb_server::db_listener::spawn_package_version_listener(db.clone(), broadcaster.clone())
-        {
-            error!("Failed to initialize database listener: {}", e);
-        }
+    if let Err(e) =
+        fossdb_server::db_listener::spawn_package_version_listener(db.clone(), broadcaster.clone())
+    {
+        error!("Failed to initialize database listener: {}", e);
     }
 
     let state = AppState {
         db: db.clone(),
         broadcaster: broadcaster.clone(),
+        collector_api_key: config.collector_api_key.clone(),
+        worker_api_key: config.worker_api_key.clone(),
+        claimed_versions: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
     };
 
-    // Initialize collectors (if not disabled)
-    #[cfg(feature = "collector")]
-    if !no_collectors {
-        info!("Starting background collectors...");
-
-        #[cfg(feature = "collector")]
-        let mut collectors: Vec<Arc<dyn collector_models::Collector + Send + Sync>> = vec![];
-
-        #[cfg(feature = "collector-rust")]
-        {
-            let client = reqwest::Client::builder().user_agent("fossdb").build()?;
-            let crates_collector = collectors::crates_io::CratesIoCollector::new(client.clone());
-            collectors.push(Arc::new(crates_collector));
-        }
-
-        #[cfg(feature = "collector-libraries-io")]
-        if let Some(api_key) = config.libraries_io_api_key.clone() {
-            let client = reqwest::Client::builder().user_agent("fossdb").build()?;
-            let libraries_collector =
-                collectors::libraries_io::LibrariesIoCollector::new(client.clone(), api_key);
-            collectors.push(Arc::new(libraries_collector));
-        } else {
-            use anyhow::bail;
-
-            bail!("No API given");
-        }
-
-        #[cfg(feature = "collector-nixpkgs")]
-        collectors.push(Arc::new(collectors::nixpkgs::NixpkgsCollector {}));
-
-        // Spawn one background task per collector
-        for collector in collectors {
-            let db = db.clone();
-            let interval_hours = config.collector_interval_hours;
-            tokio::spawn(async move { run_collector_loop(collector, db, interval_hours).await });
-        }
-
-        // Initialize notification processor
-        #[cfg(feature = "email")]
-        if config.email_enabled {
-            info!("Starting notification processor...");
-
-            let email_service = Arc::new(
-                email::EmailService::new(config.clone())
-                    .expect("Failed to initialize email service"),
-            );
-
-            let processor = notifications::NotificationProcessor::new(db.clone(), email_service);
-
-            let notification_interval_minutes = 5;
-
-            tokio::spawn(async move {
-                loop {
-                    if let Err(e) = processor.process_new_releases().await {
-                        error!("Notification processing error: {}", e);
-                    }
-
-                    tokio::time::sleep(tokio::time::Duration::from_secs(
-                        notification_interval_minutes * 60,
-                    ))
-                    .await;
-                }
-            });
-        }
-        #[cfg(feature = "email")]
-        if !config.email_enabled {
-            info!("Email disabled, notification processor not started");
-        }
-
-        // Spawn timeline event purge task
-        let purge_db = db.clone();
-        let retention_days = config.timeline_retention_days;
+    // Email notifications
+    #[cfg(feature = "email")]
+    if config.email_enabled {
+        info!("Starting notification processor...");
+        let email_service = Arc::new(
+            email::EmailService::new(config.clone())
+                .expect("Failed to initialize email service"),
+        );
+        let processor = notifications::NotificationProcessor::new(db.clone(), email_service);
         tokio::spawn(async move {
             loop {
-                // Run purge daily
-                tokio::time::sleep(tokio::time::Duration::from_secs(24 * 60 * 60)).await;
-
-                info!("Running timeline event purge (retention: {} days)", retention_days);
-                match purge_db.purge_old_timeline_events(chrono::Duration::days(retention_days as i64)) {
-                    Ok(count) => {
-                        if count > 0 {
-                            info!("Successfully purged {} old timeline events", count);
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to purge old timeline events: {}", e);
-                    }
+                if let Err(e) = processor.process_new_releases().await {
+                    error!("Notification processing error: {}", e);
                 }
+                tokio::time::sleep(tokio::time::Duration::from_secs(5 * 60)).await;
             }
         });
     }
-
-    #[cfg(feature = "collector")]
-    if no_collectors {
-        info!("Collectors disabled via --no-collectors flag");
+    #[cfg(feature = "email")]
+    if !config.email_enabled {
+        info!("Email disabled, notification processor not started");
     }
 
-    // Protected routes that require authentication
+    // Timeline event purge task
+    let purge_db = db.clone();
+    let retention_days = config.timeline_retention_days;
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(24 * 60 * 60)).await;
+            info!("Running timeline event purge (retention: {} days)", retention_days);
+            match purge_db.purge_old_timeline_events(chrono::Duration::days(retention_days as i64)) {
+                Ok(count) => {
+                    if count > 0 {
+                        info!("Purged {} old timeline events", count);
+                    }
+                }
+                Err(e) => error!("Failed to purge old timeline events: {}", e),
+            }
+        }
+    });
+
+    // Internal worker API on separate port
+    let worker_api = Router::new()
+        .route("/packages/next", get(handlers::worker::get_task))
+        .route("/analysis", post(handlers::worker::submit_analysis))
+        .route("/packages/:package_id/analyses", get(handlers::worker::get_package_analyses))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::worker_auth_middleware,
+        ))
+        .with_state(state.clone());
+
+    let worker_listener = tokio::net::TcpListener::bind(
+        format!("0.0.0.0:{}", config.worker_port)
+    ).await?;
+    info!("Worker API running on http://0.0.0.0:{}", config.worker_port);
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(worker_listener, worker_api).await {
+            error!("Worker API server error: {}", e);
+        }
+    });
+
+    // Internal collector API on separate port
+    let collector_api = Router::new()
+        .route("/packages", get(handlers::collector::get_package))
+        .route("/packages", post(handlers::collector::upsert_package))
+        .route("/packages/:name/timestamp", put(handlers::collector::update_package_timestamp))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::collector_auth_middleware,
+        ))
+        .with_state(state.clone());
+
+    let collector_listener = tokio::net::TcpListener::bind(
+        format!("0.0.0.0:{}", config.collector_port)
+    ).await?;
+    info!("Collector API running on http://0.0.0.0:{}", config.collector_port);
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(collector_listener, collector_api).await {
+            error!("Collector API server error: {}", e);
+        }
+    });
+
+    // Public API
     let protected = Router::new()
         .route("/api/packages", post(handlers::packages::create_package))
-        .route(
-            "/api/users/subscriptions",
-            get(handlers::users::get_subscriptions),
-        )
-        .route(
-            "/api/users/subscriptions",
-            post(handlers::users::add_subscription),
-        )
+        .route("/api/users/subscriptions", get(handlers::users::get_subscriptions))
+        .route("/api/users/subscriptions", post(handlers::users::add_subscription))
         .route(
             "/api/users/subscriptions/{package_name}",
             axum::routing::delete(handlers::users::remove_subscription),
         )
         .route(
             "/api/users/subscriptions/{package_name}/notifications",
-            axum::routing::put(handlers::users::update_package_notification),
+            put(handlers::users::update_package_notification),
         )
-        .route(
-            "/api/users/settings/notifications",
-            get(handlers::users::get_notification_settings),
-        )
-        .route(
-            "/api/users/settings/notifications",
-            axum::routing::put(handlers::users::update_notification_settings),
-        )
+        .route("/api/users/settings/notifications", get(handlers::users::get_notification_settings))
+        .route("/api/users/settings/notifications", put(handlers::users::update_notification_settings))
         .layer(axum::middleware::from_fn(middleware::auth_middleware))
         .with_state(state.clone());
 
-    // Timeline route with optional auth - shows global timeline for logged-out users,
-    // personal timeline for logged-in users
     let timeline_route = Router::new()
         .route("/api/users/timeline", get(handlers::users::get_timeline))
-        .layer(axum::middleware::from_fn(
-            middleware::optional_auth_middleware,
-        ))
+        .layer(axum::middleware::from_fn(middleware::optional_auth_middleware))
         .with_state(state.clone());
 
     let app = Router::new()
@@ -285,30 +231,15 @@ async fn start_server(config: Config, no_collectors: bool) -> Result<()> {
         .route("/api/stats", get(handlers::analytics::get_db_stats))
         .route("/api/packages", get(handlers::packages::list_packages))
         .route("/api/packages/{id}", get(handlers::packages::get_package))
-        .route(
-            "/api/packages/{id}/versions",
-            get(handlers::packages::get_package_versions),
-        )
-        .route(
-            "/api/packages/{id}/subscribers",
-            get(handlers::packages::get_package_subscriber_count),
-        )
+        .route("/api/packages/{id}/versions", get(handlers::packages::get_package_versions))
+        .route("/api/packages/{id}/subscribers", get(handlers::packages::get_package_subscriber_count))
         .route("/api/auth/register", post(handlers::auth::register))
-        .route(
-            "/api/auth/register-form",
-            post(handlers::auth::register_form),
-        )
+        .route("/api/auth/register-form", post(handlers::auth::register_form))
         .route("/api/auth/login", post(handlers::auth::login))
         .route("/api/auth/login-form", post(handlers::auth::login_form))
         .route("/api/analytics", get(handlers::analytics::get_analytics))
-        .route(
-            "/api/analytics/languages",
-            get(handlers::analytics::get_language_trends),
-        )
-        .route(
-            "/api/analytics/security",
-            get(handlers::analytics::get_security_report),
-        )
+        .route("/api/analytics/languages", get(handlers::analytics::get_language_trends))
+        .route("/api/analytics/security", get(handlers::analytics::get_security_report))
         .route("/ws/timeline", get(websocket::timeline_websocket_handler))
         .merge(timeline_route)
         .merge(protected)
@@ -317,7 +248,6 @@ async fn start_server(config: Config, no_collectors: bool) -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     info!("Server running on http://0.0.0.0:3000");
-
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -329,60 +259,17 @@ async fn health_check() -> Json<Value> {
     }))
 }
 
-#[cfg(feature = "collector")]
-async fn run_collector_loop(
-    collector: Arc<dyn collector_models::Collector + Send + Sync>,
-    db: Arc<Database>,
-    interval_hours: u64,
-) {
-    let collector_name = collector.name();
-
-    loop {
-        info!("Starting collector: {}", collector_name);
-
-        match collector.collect(db.clone()).await {
-            Ok(()) => {
-                info!("Collector {} completed successfully", collector_name);
-            }
-            Err(e) => {
-                error!("Collector {} failed: {}", collector_name, e);
-            }
-        }
-
-        let sleep_duration = tokio::time::Duration::from_secs(interval_hours * 3600);
-        info!(
-            "Collector {} sleeping for {} hours",
-            collector_name, interval_hours
-        );
-        tokio::time::sleep(sleep_duration).await;
-    }
-}
-
-// Generic export function to avoid code duplication
 fn export_table<T: Serialize>(table_name: &str, data: Vec<T>, output_path: &Path) -> Result<()> {
     info!("Exporting {}...", table_name);
-    eprintln!(
-        "Exporting {} {} to {}...",
-        data.len(),
-        table_name,
-        output_path.display()
-    );
-
+    eprintln!("Exporting {} {} to {}...", data.len(), table_name, output_path.display());
     let json = serde_json::to_string_pretty(&data)?;
     std::fs::write(output_path, json)?;
-
     eprintln!("✓ Exported {} {}", data.len(), table_name);
     Ok(())
 }
 
-async fn export_database(
-    config: &Config,
-    output_dir: PathBuf,
-    table: Option<String>,
-) -> Result<()> {
+async fn export_database(config: &Config, output_dir: PathBuf, table: Option<String>) -> Result<()> {
     let db = Database::new(&config.database_path)?;
-
-    // Create output directory if it doesn't exist
     std::fs::create_dir_all(&output_dir)?;
 
     let tables_to_export = if let Some(table_name) = table {
@@ -399,40 +286,26 @@ async fn export_database(
 
     for table_name in tables_to_export {
         let output_path = output_dir.join(format!("{}.json", table_name));
-
         match table_name.as_str() {
             "packages" => export_table("packages", db.get_all_packages()?, &output_path)?,
             "versions" => export_table("versions", db.get_all_versions()?, &output_path)?,
             "users" => export_table("users", db.get_all_users()?, &output_path)?,
-            "vulnerabilities" => export_table(
-                "vulnerabilities",
-                db.get_all_vulnerabilities()?,
-                &output_path,
-            )?,
-            "timeline_events" => export_table(
-                "timeline events",
-                db.get_all_timeline_events()?,
-                &output_path,
-            )?,
+            "vulnerabilities" => export_table("vulnerabilities", db.get_all_vulnerabilities()?, &output_path)?,
+            "timeline_events" => export_table("timeline events", db.get_all_timeline_events()?, &output_path)?,
             _ => {
-                eprintln!(
-                    "Error: Unknown table '{}'. Valid tables: packages, versions, users, vulnerabilities, timeline_events",
-                    table_name
-                );
+                eprintln!("Error: Unknown table '{}'", table_name);
                 return Err(anyhow::anyhow!("Unknown table: {}", table_name));
             }
         }
     }
 
     eprintln!("\nExport completed successfully!");
-
     Ok(())
 }
 
 async fn import_database(config: &Config, input: PathBuf, merge: bool) -> Result<()> {
     let db = Database::new(&config.database_path)?;
 
-    // Determine table name from filename
     let table_name = input
         .file_stem()
         .and_then(|s| s.to_str())
@@ -443,7 +316,6 @@ async fn import_database(config: &Config, input: PathBuf, merge: bool) -> Result
 
     let json = std::fs::read_to_string(&input)?;
 
-    // Helper macro to reduce duplication
     macro_rules! import_with_progress {
         ($data:expr, $type_name:expr, $get_method:ident, $insert_method:ident) => {{
             eprintln!("Found {} {} to import", $data.len(), $type_name);
@@ -456,7 +328,7 @@ async fn import_database(config: &Config, input: PathBuf, merge: bool) -> Result
 
             let total = $data.len();
             for (idx, item) in $data.into_iter().enumerate() {
-                if merge && db.$get_method(item.inner.id)?.is_some() {
+                if merge && db.$get_method(item.id)?.is_some() {
                     continue;
                 }
                 db.$insert_method(item)?;
@@ -486,32 +358,18 @@ async fn import_database(config: &Config, input: PathBuf, merge: bool) -> Result
         }
         "vulnerabilities" => {
             let data: Vec<Vulnerability> = serde_json::from_str(&json)?;
-            import_with_progress!(
-                data,
-                "vulnerabilities",
-                get_vulnerability,
-                insert_vulnerability
-            );
+            import_with_progress!(data, "vulnerabilities", get_vulnerability, insert_vulnerability);
         }
         "timeline_events" => {
             let data: Vec<TimelineEvent> = serde_json::from_str(&json)?;
-            import_with_progress!(
-                data,
-                "timeline events",
-                get_timeline_event,
-                insert_timeline_event
-            );
+            import_with_progress!(data, "timeline events", get_timeline_event, insert_timeline_event);
         }
         _ => {
-            eprintln!(
-                "Error: Unknown table '{}'. Valid tables: packages, versions, users, vulnerabilities, timeline_events",
-                table_name
-            );
+            eprintln!("Error: Unknown table '{}'", table_name);
             return Err(anyhow::anyhow!("Unknown table: {}", table_name));
         }
     }
 
     eprintln!("\nImport completed successfully!");
-
     Ok(())
 }

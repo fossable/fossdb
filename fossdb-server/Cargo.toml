@@ -12,7 +12,7 @@ license = "Unlicense"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["api-server", "collector-rust", "collector-nixpkgs", "email"]
+default = ["api-server", "email"]
 db = ["dep:native_db", "dep:native_model", "dep:once_cell"]
 api-server = [
   "db",
@@ -26,12 +26,7 @@ api-server = [
   "dep:tracing-subscriber",
   "dep:dotenvy",
   "dep:tokio-util",
-  "dep:governor",
 ]
-collector = ["db", "dep:tokio"]
-collector-rust = ["collector", "dep:reqwest", "dep:crates_io_api"]
-collector-nixpkgs = ["collector", "dep:reqwest"]
-collector-libraries-io = ["collector", "dep:reqwest"]
 email = ["dep:tokio", "dep:lettre", "dep:tera", "dep:once_cell"]
 
 [dependencies]
@@ -64,17 +59,6 @@ tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true }
 dotenvy = { version = "0.15", optional = true }
 tokio-util = { version = "0.7", optional = true }
-governor = { version = "0.10.4", optional = true }
-
-# Collector dependencies
-reqwest = { version = "0.13.1", default-features = false, features = [
-  "json",
-  "rustls",
-], optional = true }
-crates_io_api = { version = "0.12", default-features = false, features = [
-  "rustls",
-], optional = true }
-
 # Email dependencies
 lettre = { version = "0.11", default-features = false, features = [
   "tokio1",

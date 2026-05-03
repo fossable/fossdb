@@ -81,10 +81,10 @@ pub async fn get_analytics(
     let mut license_counts = std::collections::HashMap::new();
 
     for pkg in &packages {
-        if let Some(lang) = &pkg.inner.language {
+        if let Some(lang) = &pkg.language {
             *language_counts.entry(lang.clone()).or_insert(0) += 1;
         }
-        if let Some(license) = &pkg.inner.license {
+        if let Some(license) = &pkg.license {
             *license_counts.entry(license.clone()).or_insert(0) += 1;
         }
     }
@@ -122,13 +122,13 @@ pub async fn get_analytics(
     // Calculate security stats from real vulnerabilities
     let critical_vulns = vulnerabilities
         .iter()
-        .filter(|v| matches!(v.inner.severity, crate::VulnerabilitySeverity::Critical))
+        .filter(|v| matches!(v.severity, crate::VulnerabilitySeverity::Critical))
         .count() as u64;
     let minor_issues = vulnerabilities
         .iter()
         .filter(|v| {
             matches!(
-                v.inner.severity,
+                v.severity,
                 crate::VulnerabilitySeverity::Low | crate::VulnerabilitySeverity::Medium
             )
         })
@@ -147,11 +147,10 @@ pub async fn get_analytics(
         .rev()
         .take(3)
         .map(|pkg| TrendingPackage {
-            name: pkg.inner.name.clone(),
-            description: pkg.inner.description.clone().unwrap_or_default(),
+            name: pkg.name.clone(),
+            description: pkg.description.clone().unwrap_or_default(),
             growth_percentage: 0.0, // No historical data yet
             category: pkg
-                .inner
                 .platform
                 .clone()
                 .unwrap_or_else(|| "other".to_string()),
@@ -184,7 +183,7 @@ pub async fn get_language_trends(
     let mut language_counts = std::collections::HashMap::new();
 
     for pkg in &packages {
-        if let Some(lang) = &pkg.inner.language {
+        if let Some(lang) = &pkg.language {
             *language_counts.entry(lang.clone()).or_insert(0) += 1;
         }
     }
@@ -221,13 +220,13 @@ pub async fn get_security_report(
     let total = packages.len() as u64;
     let critical_vulns = vulnerabilities
         .iter()
-        .filter(|v| matches!(v.inner.severity, crate::VulnerabilitySeverity::Critical))
+        .filter(|v| matches!(v.severity, crate::VulnerabilitySeverity::Critical))
         .count() as u64;
     let minor_issues = vulnerabilities
         .iter()
         .filter(|v| {
             matches!(
-                v.inner.severity,
+                v.severity,
                 crate::VulnerabilitySeverity::Low | crate::VulnerabilitySeverity::Medium
             )
         })

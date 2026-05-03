@@ -58,18 +58,18 @@ async fn handle_package_version_event(
 
     tracing::debug!(
         "Detected new PackageVersion insert: package_id={}, version={}",
-        version.inner.package_id,
-        version.inner.version
+        version.package_id,
+        version.version
     );
 
     // Get the package to retrieve its name
-    let package = match db.get_package(version.inner.package_id)? {
+    let package = match db.get_package(version.package_id)? {
         Some(pkg) => pkg,
         None => {
             tracing::warn!(
                 "Package {} not found for version {}",
-                version.inner.package_id,
-                version.inner.version
+                version.package_id,
+                version.version
             );
             return Ok(());
         }
@@ -78,18 +78,18 @@ async fn handle_package_version_event(
     let now = Utc::now();
 
     // Create timeline events for subscribed users
-    match db.get_users_subscribed_to(&package.inner.name) {
+    match db.get_users_subscribed_to(&package.name) {
         Ok(subscribed_users) => {
             for user_id in subscribed_users {
                 let event = TimelineEvent {
                     inner: fossdb::TimelineEvent {
                         id: 0,
-                        package_id: package.inner.id,
+                        package_id: package.id,
                         user_id: Some(user_id),
                         event_type: EventType::NewRelease,
-                        package_name: package.inner.name.clone(),
-                        version: Some(version.inner.version.clone()),
-                        message: format!("New version {} released", version.inner.version),
+                        package_name: package.name.clone(),
+                        version: Some(version.version.clone()),
+                        message: format!("New version {} released", version.version),
                         metadata: None,
                         created_at: now,
                         notified_at: None,
@@ -103,8 +103,8 @@ async fn handle_package_version_event(
                         tracing::debug!(
                             "Created timeline event for user {} for {} {}",
                             user_id,
-                            package.inner.name,
-                            version.inner.version
+                            package.name,
+                            version.version
                         );
                     }
                     Err(e) => {
@@ -120,7 +120,7 @@ async fn handle_package_version_event(
         Err(e) => {
             tracing::error!(
                 "Failed to get subscribed users for {}: {}",
-                package.inner.name,
+                package.name,
                 e
             );
         }
@@ -130,12 +130,12 @@ async fn handle_package_version_event(
     let global_event = TimelineEvent {
         inner: fossdb::TimelineEvent {
             id: 0,
-            package_id: package.inner.id,
+            package_id: package.id,
             user_id: None,
             event_type: EventType::NewRelease,
-            package_name: package.inner.name.clone(),
-            version: Some(version.inner.version.clone()),
-            message: format!("New version {} released", version.inner.version),
+            package_name: package.name.clone(),
+            version: Some(version.version.clone()),
+            message: format!("New version {} released", version.version),
             metadata: None,
             created_at: now,
             notified_at: None,
@@ -146,8 +146,8 @@ async fn handle_package_version_event(
     broadcaster.broadcast(global_event);
     tracing::info!(
         "Broadcast global timeline event for {} {}",
-        package.inner.name,
-        version.inner.version
+        package.name,
+        version.version
     );
 
     Ok(())

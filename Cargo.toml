@@ -1,5 +1,5 @@
 [workspace]
-members = ["fossdb","fossdb-server", "fossdb-web"]
+members = ["fossdb", "fossdb-collector", "fossdb-server", "fossdb-web", "fossdb-worker"]
 resolver = "2"
 
 [workspace.package]

@@ -28,9 +28,8 @@ pub async fn list_packages(
             if let Some(search) = &params.search {
                 let search_lower = search.to_lowercase();
                 packages.retain(|pkg| {
-                    pkg.inner.name.to_lowercase().contains(&search_lower)
+                    pkg.name.to_lowercase().contains(&search_lower)
                         || pkg
-                            .inner
                             .description
                             .as_ref()
                             .map(|d| d.to_lowercase().contains(&search_lower))
@@ -40,7 +39,7 @@ pub async fn list_packages(
 
             // Filter by tag if provided
             if let Some(tag) = &params.tag {
-                packages.retain(|pkg| pkg.inner.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)));
+                packages.retain(|pkg| pkg.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)));
             }
 
             // Apply pagination
@@ -133,10 +132,10 @@ pub async fn get_package_subscriber_count(
     };
 
     // Get subscriber count
-    match state.db.get_users_subscribed_to(&package.inner.name) {
+    match state.db.get_users_subscribed_to(&package.name) {
         Ok(subscribers) => Ok(Json(serde_json::json!({
             "package_id": id,
-            "package_name": package.inner.name,
+            "package_name": package.name,
             "subscriber_count": subscribers.len()
         }))),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),

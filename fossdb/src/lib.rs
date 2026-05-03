@@ -196,6 +196,82 @@ pub struct PackagesResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectedPackage {
+    pub name: String,
+    pub description: Option<String>,
+    pub homepage: Option<String>,
+    pub repository: Option<String>,
+    pub license: Option<String>,
+    pub tags: Vec<String>,
+    pub versions: Vec<CollectedVersion>,
+    pub platform: Option<String>,
+    pub language: Option<String>,
+    pub status: Option<String>,
+    pub dependents_count: Option<u32>,
+    pub rank: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectedVersion {
+    pub version: String,
+    pub release_date: DateTime<Utc>,
+    pub download_url: Option<String>,
+    pub checksum: Option<String>,
+    pub dependencies: Vec<Dependency>,
+    pub changelog: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageLookup {
+    pub package: Package,
+    pub version_strings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerTask {
+    pub package: Package,
+    pub version: PackageVersion,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkerAnalysis {
+    pub id: u64,
+    pub package_id: u64,
+    pub version_id: u64,
+    pub analyzed_at: DateTime<Utc>,
+    pub findings: Vec<AnalysisFinding>,
+    pub checksum_verified: Option<bool>,
+    pub detected_license: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AnalysisFinding {
+    pub kind: FindingKind,
+    pub severity: FindingSeverity,
+    pub description: String,
+    pub location: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum FindingKind {
+    LicenseDetected,
+    LicenseMismatch,
+    SecretDetected,
+    ChecksumMismatch,
+    BinaryMetadata,
+    MaliciousPattern,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum FindingSeverity {
+    Info,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum WebSocketMessage {
     Auth { token: String },
