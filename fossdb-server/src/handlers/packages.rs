@@ -28,8 +28,9 @@ pub async fn list_packages(
             if let Some(search) = &params.search {
                 let search_lower = search.to_lowercase();
                 packages.retain(|pkg| {
-                    pkg.name.to_lowercase().contains(&search_lower)
+                    pkg.inner.name.to_lowercase().contains(&search_lower)
                         || pkg
+                            .inner
                             .description
                             .as_ref()
                             .map(|d| d.to_lowercase().contains(&search_lower))
@@ -39,7 +40,7 @@ pub async fn list_packages(
 
             // Filter by tag if provided
             if let Some(tag) = &params.tag {
-                packages.retain(|pkg| pkg.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)));
+                packages.retain(|pkg| pkg.inner.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)));
             }
 
             // Apply pagination
@@ -82,20 +83,22 @@ pub async fn create_package(
     let now = Utc::now();
 
     let package = Package {
-        id: 0, // Will be auto-generated
-        name: payload.name,
-        description: payload.description,
-        homepage: payload.homepage,
-        repository: payload.repository,
-        license: payload.license,
-        tags: payload.tags,
-        created_at: now,
-        updated_at: now,
-        platform: None,
-        language: None,
-        status: None,
-        dependents_count: None,
-        rank: None,
+        inner: fossdb::Package {
+            id: 0, // Will be auto-generated
+            name: payload.name,
+            description: payload.description,
+            homepage: payload.homepage,
+            repository: payload.repository,
+            license: payload.license,
+            tags: payload.tags,
+            created_at: now,
+            updated_at: now,
+            platform: None,
+            language: None,
+            status: None,
+            dependents_count: None,
+            rank: None,
+        },
     };
 
     match state.db.insert_package(package) {
@@ -130,10 +133,10 @@ pub async fn get_package_subscriber_count(
     };
 
     // Get subscriber count
-    match state.db.get_users_subscribed_to(&package.name) {
+    match state.db.get_users_subscribed_to(&package.inner.name) {
         Ok(subscribers) => Ok(Json(serde_json::json!({
             "package_id": id,
-            "package_name": package.name,
+            "package_name": package.inner.name,
             "subscriber_count": subscribers.len()
         }))),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),

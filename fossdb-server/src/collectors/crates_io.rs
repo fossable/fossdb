@@ -67,13 +67,13 @@ impl Collector for CratesIoCollector {
                     Ok(Some(existing_package)) => {
                         // Package exists - check if it has been updated since we last scraped
                         // Use the updated_at field from the search result to avoid unnecessary API calls
-                        if krate.updated_at <= existing_package.updated_at {
+                        if krate.updated_at <= existing_package.inner.updated_at {
                             // Package hasn't been updated since we last scraped it, skip
                             tracing::debug!(
                                 "Package {} hasn't been updated (crates.io: {}, local: {}), skipping",
                                 crate_name,
                                 krate.updated_at,
-                                existing_package.updated_at
+                                existing_package.inner.updated_at
                             );
                             continue;
                         }
@@ -83,16 +83,16 @@ impl Collector for CratesIoCollector {
                             "Package {} has been updated (crates.io: {}, local: {}), fetching details",
                             crate_name,
                             krate.updated_at,
-                            existing_package.updated_at
+                            existing_package.inner.updated_at
                         );
 
                         match self.client.full_crate(&crate_name, false).await {
                             Ok(full_crate) => {
                                 let existing_versions =
-                                    db.get_versions_by_package(existing_package.id)?;
+                                    db.get_versions_by_package(existing_package.inner.id)?;
                                 let existing_version_nums: HashSet<String> = existing_versions
                                     .iter()
-                                    .map(|v| v.version.clone())
+                                    .map(|v| v.inner.version.clone())
                                     .collect();
 
                                 let now = Utc::now();
@@ -108,19 +108,21 @@ impl Collector for CratesIoCollector {
                                         );
 
                                         let version = PackageVersion {
-                                            id: 0,
-                                            package_id: existing_package.id,
-                                            version: v.num.clone(),
-                                            release_date: v.created_at,
-                                            download_url: Some(format!(
-                                                "https://crates.io{}",
-                                                v.dl_path
-                                            )),
-                                            checksum: None,
-                                            dependencies: Vec::new(),
-                                            vulnerabilities: Vec::new(),
-                                            changelog: None,
-                                            created_at: now,
+                                            inner: fossdb::PackageVersion {
+                                                id: 0,
+                                                package_id: existing_package.inner.id,
+                                                version: v.num.clone(),
+                                                release_date: v.created_at,
+                                                download_url: Some(format!(
+                                                    "https://crates.io{}",
+                                                    v.dl_path
+                                                )),
+                                                checksum: None,
+                                                dependencies: Vec::new(),
+                                                vulnerabilities: Vec::new(),
+                                                changelog: None,
+                                                created_at: now,
+                                            },
                                         };
 
                                         // Save version - timeline events will be created automatically by the database listener
@@ -136,7 +138,7 @@ impl Collector for CratesIoCollector {
 
                                 // Update the package's updated_at timestamp
                                 let mut updated_package = existing_package.clone();
-                                updated_package.updated_at = krate.updated_at;
+                                updated_package.inner.updated_at = krate.updated_at;
                                 if let Err(e) = db.update_package(updated_package) {
                                     tracing::error!(
                                         "Failed to update package {} timestamp: {}",
@@ -189,25 +191,30 @@ impl Collector for CratesIoCollector {
 
                                 // Create and save the package using data from both search result and full details
                                 let package = Package {
-                                    id: 0, // Will be auto-generated
-                                    name: full_crate.name.clone(),
-                                    description: full_crate.description.clone(),
-                                    homepage: full_crate.homepage.clone(),
-                                    repository: full_crate.repository.clone(),
-                                    license,
-                                    tags: vec!["rust".to_string(), "crate".to_string()],
-                                    created_at: now,
-                                    updated_at: krate.updated_at, // Use timestamp from search result
-                                    platform: Some("crates.io".to_string()),
-                                    language: Some("rust".to_string()),
-                                    status: None,
-                                    dependents_count: None,
-                                    rank: None,
+                                    inner: fossdb::Package {
+                                        id: 0, // Will be auto-generated
+                                        name: full_crate.name.clone(),
+                                        description: full_crate.description.clone(),
+                                        homepage: full_crate.homepage.clone(),
+                                        repository: full_crate.repository.clone(),
+                                        license,
+                                        tags: vec!["rust".to_string(), "crate".to_string()],
+                                        created_at: now,
+                                        updated_at: krate.updated_at, // Use timestamp from search result
+                                        platform: Some("crates.io".to_string()),
+                                        language: Some("rust".to_string()),
+                                        status: None,
+                                        dependents_count: None,
+                                        rank: None,
+                                    },
                                 };
 
                                 match db.insert_package(package) {
                                     Ok(saved_package) => {
-                                        tracing::info!("Saved package: {}", saved_package.name);
+                                        tracing::info!(
+                                            "Saved package: {}",
+                                            saved_package.inner.name
+                                        );
 
                                         // Save versions (up to 10 non-yanked versions)
                                         for v in full_crate
@@ -217,33 +224,35 @@ impl Collector for CratesIoCollector {
                                             .take(10)
                                         {
                                             let version = PackageVersion {
-                                                id: 0, // Will be auto-generated
-                                                package_id: saved_package.id,
-                                                version: v.num.clone(),
-                                                release_date: v.created_at,
-                                                download_url: Some(format!(
-                                                    "https://crates.io{}",
-                                                    v.dl_path
-                                                )),
-                                                checksum: None,
-                                                dependencies: Vec::new(), // Could fetch dependencies if needed
-                                                vulnerabilities: Vec::new(),
-                                                changelog: None,
-                                                created_at: now,
+                                                inner: fossdb::PackageVersion {
+                                                    id: 0, // Will be auto-generated
+                                                    package_id: saved_package.inner.id,
+                                                    version: v.num.clone(),
+                                                    release_date: v.created_at,
+                                                    download_url: Some(format!(
+                                                        "https://crates.io{}",
+                                                        v.dl_path
+                                                    )),
+                                                    checksum: None,
+                                                    dependencies: Vec::new(), // Could fetch dependencies if needed
+                                                    vulnerabilities: Vec::new(),
+                                                    changelog: None,
+                                                    created_at: now,
+                                                },
                                             };
 
                                             if let Err(e) = db.insert_version(version) {
                                                 tracing::error!(
                                                     "Failed to save version {} for package {}: {}",
                                                     v.num,
-                                                    saved_package.name,
+                                                    saved_package.inner.name,
                                                     e
                                                 );
                                             } else {
                                                 tracing::debug!(
                                                     "Saved version {} for package {}",
                                                     v.num,
-                                                    saved_package.name
+                                                    saved_package.inner.name
                                                 );
                                             }
                                         }

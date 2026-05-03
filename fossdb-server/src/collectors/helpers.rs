@@ -20,7 +20,7 @@ where
     let existing_versions = db.get_versions_by_package(package_id)?;
     let existing_version_nums: HashSet<String> = existing_versions
         .iter()
-        .map(|v| v.version.clone())
+        .map(|v| v.inner.version.clone())
         .collect();
 
     let now = Utc::now();
@@ -61,25 +61,25 @@ where
     F: Fn(&VersionData, u64, DateTime<Utc>) -> PackageVersion,
 {
     let saved_package = db.insert_package(package)?;
-    tracing::info!("Saved package: {}", saved_package.name);
+    tracing::info!("Saved package: {}", saved_package.inner.name);
 
     let now = Utc::now();
 
     for version_data in versions {
-        let version = create_version(&version_data, saved_package.id, now);
+        let version = create_version(&version_data, saved_package.inner.id, now);
 
         if let Err(e) = db.insert_version(version) {
             tracing::error!(
                 "Failed to save version {} for package {}: {}",
                 version_data.version,
-                saved_package.name,
+                saved_package.inner.name,
                 e
             );
         } else {
             tracing::debug!(
                 "Saved version {} for package {}",
                 version_data.version,
-                saved_package.name
+                saved_package.inner.name
             );
         }
     }

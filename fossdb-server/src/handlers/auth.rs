@@ -40,14 +40,16 @@ async fn register_user(
     let password_hash = hash_password(&password).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let user = User {
-        id: 0, // Will be auto-generated
-        username: username.clone(),
-        email,
-        password_hash,
-        subscriptions: Vec::new(),
-        created_at: Utc::now(),
-        is_verified: false,
-        notifications_enabled: true, // Enable notifications by default
+        inner: fossdb::User {
+            id: 0, // Will be auto-generated
+            username: username.clone(),
+            email,
+            password_hash,
+            subscriptions: Vec::new(),
+            created_at: Utc::now(),
+            is_verified: false,
+            notifications_enabled: true, // Enable notifications by default
+        },
     };
 
     let user = state
@@ -55,10 +57,13 @@ async fn register_user(
         .insert_user(user)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let token = create_jwt(&user.id.to_string(), &user.username)
+    let token = create_jwt(&user.inner.id.to_string(), &user.inner.username)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(AuthResponse { token, user }))
+    Ok(Json(AuthResponse {
+        token,
+        user: user.inner,
+    }))
 }
 
 pub async fn login(
@@ -87,15 +92,18 @@ async fn login_user(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let is_valid = verify_password(&password, &user.password_hash)
+    let is_valid = verify_password(&password, &user.inner.password_hash)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if !is_valid {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let token = create_jwt(&user.id.to_string(), &user.username)
+    let token = create_jwt(&user.inner.id.to_string(), &user.inner.username)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(AuthResponse { token, user }))
+    Ok(Json(AuthResponse {
+        token,
+        user: user.inner,
+    }))
 }

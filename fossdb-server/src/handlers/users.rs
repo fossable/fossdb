@@ -65,7 +65,7 @@ pub async fn get_timeline(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         // Sort by release date (most recent first)
-        versions.sort_by(|a, b| b.release_date.cmp(&a.release_date));
+        versions.sort_by(|a, b| b.inner.release_date.cmp(&a.inner.release_date));
 
         // Take the 50 most recent versions and convert to timeline events
         versions
@@ -73,21 +73,27 @@ pub async fn get_timeline(
             .take(50)
             .filter_map(|version| {
                 // Get package name
-                state.db.get_package(version.package_id).ok()?.map(|package| {
-                    let version_str = version.version.clone();
-                    TimelineEvent {
-                        id: 0,
-                        package_id: package.id,
-                        user_id: None,
-                        event_type: EventType::NewRelease,
-                        package_name: package.name,
-                        version: Some(version.version),
-                        message: format!("New version {} released", version_str),
-                        metadata: None,
-                        created_at: version.release_date,
-                        notified_at: None,
-                    }
-                })
+                state
+                    .db
+                    .get_package(version.inner.package_id)
+                    .ok()?
+                    .map(|package| {
+                        let version_str = version.inner.version.clone();
+                        TimelineEvent {
+                            inner: fossdb::TimelineEvent {
+                                id: 0,
+                                package_id: package.inner.id,
+                                user_id: None,
+                                event_type: EventType::NewRelease,
+                                package_name: package.inner.name,
+                                version: Some(version.inner.version),
+                                message: format!("New version {} released", version_str),
+                                metadata: None,
+                                created_at: version.inner.release_date,
+                                notified_at: None,
+                            },
+                        }
+                    })
             })
             .collect()
     };
@@ -127,7 +133,7 @@ pub async fn get_subscriptions(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(SubscriptionResponse {
-        subscriptions: user.subscriptions,
+        subscriptions: user.inner.subscriptions,
     }))
 }
 
@@ -156,11 +162,12 @@ pub async fn add_subscription(
 
     // Add subscription if not already subscribed
     if !user
+        .inner
         .subscriptions
         .iter()
         .any(|s| s.package_name == payload.package_name)
     {
-        user.subscriptions.push(PackageSubscription {
+        user.inner.subscriptions.push(PackageSubscription {
             package_name: payload.package_name,
             notifications_enabled: true, // Default to enabled
         });
@@ -171,7 +178,7 @@ pub async fn add_subscription(
     }
 
     Ok(Json(SubscriptionResponse {
-        subscriptions: user.subscriptions,
+        subscriptions: user.inner.subscriptions,
     }))
 }
 
@@ -188,7 +195,8 @@ pub async fn remove_subscription(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    user.subscriptions
+    user.inner
+        .subscriptions
         .retain(|s| s.package_name != package_name);
 
     state
@@ -197,7 +205,7 @@ pub async fn remove_subscription(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(SubscriptionResponse {
-        subscriptions: user.subscriptions,
+        subscriptions: user.inner.subscriptions,
     }))
 }
 
@@ -214,7 +222,7 @@ pub async fn get_notification_settings(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(NotificationSettingsResponse {
-        notifications_enabled: user.notifications_enabled,
+        notifications_enabled: user.inner.notifications_enabled,
     }))
 }
 
@@ -231,7 +239,7 @@ pub async fn update_notification_settings(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    user.notifications_enabled = payload.notifications_enabled;
+    user.inner.notifications_enabled = payload.notifications_enabled;
 
     state
         .db
@@ -259,6 +267,7 @@ pub async fn update_package_notification(
 
     // Find and update the subscription
     if let Some(subscription) = user
+        .inner
         .subscriptions
         .iter_mut()
         .find(|s| s.package_name == package_name)
@@ -271,7 +280,7 @@ pub async fn update_package_notification(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         Ok(Json(SubscriptionResponse {
-            subscriptions: user.subscriptions,
+            subscriptions: user.inner.subscriptions,
         }))
     } else {
         Err(StatusCode::NOT_FOUND)

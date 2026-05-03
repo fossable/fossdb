@@ -133,7 +133,7 @@ async fn start_server(config: Config, no_collectors: bool) -> Result<()> {
     #[cfg(feature = "collector")]
     if !no_collectors {
         if let Err(e) =
-            fossdb::db_listener::spawn_package_version_listener(db.clone(), broadcaster.clone())
+            fossdb_server::db_listener::spawn_package_version_listener(db.clone(), broadcaster.clone())
         {
             error!("Failed to initialize database listener: {}", e);
         }
@@ -456,7 +456,7 @@ async fn import_database(config: &Config, input: PathBuf, merge: bool) -> Result
 
             let total = $data.len();
             for (idx, item) in $data.into_iter().enumerate() {
-                if merge && db.$get_method(item.id)?.is_some() {
+                if merge && db.$get_method(item.inner.id)?.is_some() {
                     continue;
                 }
                 db.$insert_method(item)?;

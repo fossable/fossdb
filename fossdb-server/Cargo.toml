@@ -13,7 +13,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["api-server", "collector-rust", "collector-nixpkgs", "email"]
-db = ["dep:native_db", "dep:native_model"]
+db = ["dep:native_db", "dep:native_model", "dep:once_cell"]
 api-server = [
   "db",
   "dep:tokio",
@@ -42,7 +42,10 @@ futures.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 
-# fossdb-specific dependencies
+# Core types
+fossdb = { path = "../fossdb", version = "0.0.1" }
+
+# Server dependencies
 async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 regex = "1.0"

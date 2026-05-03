@@ -82,14 +82,14 @@ async fn handle_socket(socket: WebSocket, broadcaster: Arc<TimelineBroadcaster>)
                     // Filter events based on authentication:
                     // - If not authenticated: only send global events (user_id = None)
                     // - If authenticated: only send events for this user
-                    let should_send = match (user_id, db_event.user_id) {
+                    let should_send = match (user_id, db_event.inner.user_id) {
                         (None, None) => true,  // Not authenticated, global event
                         (Some(uid), Some(event_uid)) if uid == event_uid => true,  // Authenticated, personal event
                         _ => false,  // Don't send
                     };
 
                     if should_send {
-                        let msg = crate::WebSocketMessage::TimelineEvent { event: db_event };
+                        let msg = crate::WebSocketMessage::TimelineEvent { event: db_event.inner };
                         let json = serde_json::to_string(&msg).unwrap();
                         if sender.send(axum::extract::ws::Message::Text(json.into())).await.is_err() {
                             break;

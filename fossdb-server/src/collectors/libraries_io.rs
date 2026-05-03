@@ -294,7 +294,7 @@ impl Collector for LibrariesIoCollector {
                                     );
 
                                     let existing_versions =
-                                        match db.get_versions_by_package(existing_package.id) {
+                                        match db.get_versions_by_package(existing_package.inner.id) {
                                             Ok(v) => v,
                                             Err(e) => {
                                                 tracing::error!(
@@ -308,7 +308,7 @@ impl Collector for LibrariesIoCollector {
 
                                     let existing_version_nums: HashSet<String> = existing_versions
                                         .iter()
-                                        .map(|v| v.version.clone())
+                                        .map(|v| v.inner.version.clone())
                                         .collect();
 
                                     let now = chrono::Utc::now();
@@ -323,16 +323,18 @@ impl Collector for LibrariesIoCollector {
                                             );
 
                                             let version = PackageVersion {
-                                                id: 0,
-                                                package_id: existing_package.id,
-                                                version: version_data.version.clone(),
-                                                release_date: version_data.release_date,
-                                                download_url: version_data.download_url,
-                                                checksum: version_data.checksum,
-                                                dependencies: version_data.dependencies,
-                                                vulnerabilities: Vec::new(),
-                                                changelog: version_data.changelog,
-                                                created_at: now,
+                                                inner: fossdb::PackageVersion {
+                                                    id: 0,
+                                                    package_id: existing_package.inner.id,
+                                                    version: version_data.version.clone(),
+                                                    release_date: version_data.release_date,
+                                                    download_url: version_data.download_url,
+                                                    checksum: version_data.checksum,
+                                                    dependencies: version_data.dependencies,
+                                                    vulnerabilities: Vec::new(),
+                                                    changelog: version_data.changelog,
+                                                    created_at: now,
+                                                },
                                             };
 
                                             // Timeline events will be created automatically by the database listener
@@ -352,53 +354,60 @@ impl Collector for LibrariesIoCollector {
                                     let now = Utc::now();
 
                                     let package = Package {
-                                        id: 0, // Will be auto-generated
-                                        name: package_data.name.clone(),
-                                        description: package_data.description,
-                                        homepage: package_data.homepage,
-                                        repository: package_data.repository,
-                                        license: package_data.license,
-                                        tags: package_data.tags,
-                                        created_at: now,
-                                        updated_at: now,
-                                        platform: package_data.platform,
-                                        language: package_data.language,
-                                        status: package_data.status,
-                                        dependents_count: package_data.dependents_count,
-                                        rank: package_data.rank,
+                                        inner: fossdb::Package {
+                                            id: 0, // Will be auto-generated
+                                            name: package_data.name.clone(),
+                                            description: package_data.description,
+                                            homepage: package_data.homepage,
+                                            repository: package_data.repository,
+                                            license: package_data.license,
+                                            tags: package_data.tags,
+                                            created_at: now,
+                                            updated_at: now,
+                                            platform: package_data.platform,
+                                            language: package_data.language,
+                                            status: package_data.status,
+                                            dependents_count: package_data.dependents_count,
+                                            rank: package_data.rank,
+                                        },
                                     };
 
                                     match db.insert_package(package) {
                                         Ok(saved_package) => {
-                                            tracing::info!("Saved package: {}", saved_package.name);
+                                            tracing::info!(
+                                                "Saved package: {}",
+                                                saved_package.inner.name
+                                            );
 
                                             // Save versions
                                             for version_data in package_data.versions {
                                                 let version = PackageVersion {
-                                                    id: 0, // Will be auto-generated
-                                                    package_id: saved_package.id,
-                                                    version: version_data.version.clone(),
-                                                    release_date: version_data.release_date,
-                                                    download_url: version_data.download_url,
-                                                    checksum: version_data.checksum,
-                                                    dependencies: version_data.dependencies,
-                                                    vulnerabilities: Vec::new(),
-                                                    changelog: version_data.changelog,
-                                                    created_at: now,
+                                                    inner: fossdb::PackageVersion {
+                                                        id: 0, // Will be auto-generated
+                                                        package_id: saved_package.inner.id,
+                                                        version: version_data.version.clone(),
+                                                        release_date: version_data.release_date,
+                                                        download_url: version_data.download_url,
+                                                        checksum: version_data.checksum,
+                                                        dependencies: version_data.dependencies,
+                                                        vulnerabilities: Vec::new(),
+                                                        changelog: version_data.changelog,
+                                                        created_at: now,
+                                                    },
                                                 };
 
                                                 if let Err(e) = db.insert_version(version) {
                                                     tracing::error!(
                                                         "Failed to save version {} for package {}: {}",
                                                         version_data.version,
-                                                        saved_package.name,
+                                                        saved_package.inner.name,
                                                         e
                                                     );
                                                 } else {
                                                     tracing::debug!(
                                                         "Saved version {} for package {}",
                                                         version_data.version,
-                                                        saved_package.name
+                                                        saved_package.inner.name
                                                     );
                                                 }
                                             }

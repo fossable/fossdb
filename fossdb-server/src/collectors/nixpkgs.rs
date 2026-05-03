@@ -229,25 +229,27 @@ impl Collector for NixpkgsCollector {
 
                     // Create the package
                     let package = Package {
-                        id: 0,
-                        name: package_name.clone(),
-                        description,
-                        homepage,
-                        repository: None, // Nixpkgs doesn't directly expose repository URLs
-                        license,
-                        tags: vec!["nix".to_string(), "nixpkgs".to_string()],
-                        created_at: now,
-                        updated_at: now,
-                        platform: Some("nixpkgs".to_string()),
-                        language: None,
-                        status: None,
-                        dependents_count: None,
-                        rank: None,
+                        inner: fossdb::Package {
+                            id: 0,
+                            name: package_name.clone(),
+                            description,
+                            homepage,
+                            repository: None, // Nixpkgs doesn't directly expose repository URLs
+                            license,
+                            tags: vec!["nix".to_string(), "nixpkgs".to_string()],
+                            created_at: now,
+                            updated_at: now,
+                            platform: Some("nixpkgs".to_string()),
+                            language: None,
+                            status: None,
+                            dependents_count: None,
+                            rank: None,
+                        },
                     };
 
                     match db.insert_package(package) {
                         Ok(saved_package) => {
-                            tracing::info!("Saved package: {}", saved_package.name);
+                            tracing::info!("Saved package: {}", saved_package.inner.name);
 
                             // Save the current version if available
                             let version_string = package_meta
@@ -257,32 +259,34 @@ impl Collector for NixpkgsCollector {
 
                             if let Some(version_str) = version_string {
                                 let version = PackageVersion {
-                                    id: 0,
-                                    package_id: saved_package.id,
-                                    version: version_str.clone(),
-                                    release_date: now, // We don't have exact release dates from nix
-                                    download_url: None,
-                                    checksum: None,
-                                    dependencies: Vec::new(),
-                                    vulnerabilities: Vec::new(),
-                                    changelog: package_meta
-                                        .as_ref()
-                                        .and_then(|m| m.meta.changelog.clone()),
-                                    created_at: now,
+                                    inner: fossdb::PackageVersion {
+                                        id: 0,
+                                        package_id: saved_package.inner.id,
+                                        version: version_str.clone(),
+                                        release_date: now, // We don't have exact release dates from nix
+                                        download_url: None,
+                                        checksum: None,
+                                        dependencies: Vec::new(),
+                                        vulnerabilities: Vec::new(),
+                                        changelog: package_meta
+                                            .as_ref()
+                                            .and_then(|m| m.meta.changelog.clone()),
+                                        created_at: now,
+                                    },
                                 };
 
                                 if let Err(e) = db.insert_version(version) {
                                     tracing::error!(
                                         "Failed to save version {} for package {}: {}",
                                         version_str,
-                                        saved_package.name,
+                                        saved_package.inner.name,
                                         e
                                     );
                                 } else {
                                     tracing::debug!(
                                         "Saved version {} for package {}",
                                         version_str,
-                                        saved_package.name
+                                        saved_package.inner.name
                                     );
                                 }
                             }

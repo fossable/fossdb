@@ -1620,7 +1620,10 @@ dependencies = [
 name = "fossdb"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
+ "chrono",
  "clap",
+ "serde",
 ]
 
 [[package]]
@@ -1635,6 +1638,7 @@ dependencies = [
  "clap",
  "crates_io_api",
  "dotenvy",
+ "fossdb",
  "futures",
  "governor",
  "jsonwebtoken",

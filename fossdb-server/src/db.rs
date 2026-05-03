@@ -4,14 +4,16 @@ use once_cell::sync::Lazy;
 use std::sync::Arc;
 
 use crate::id_generator::IdGenerator;
+use crate::models::{
+    PackageKey, PackageVersionKey, TimelineEventKey, UserKey,
+};
 use crate::*;
 
-// Macro for generating insert methods
 macro_rules! impl_insert {
     ($method:ident, $type:ty, $id_gen:ident) => {
         pub fn $method(&self, mut entity: $type) -> Result<$type> {
-            if entity.id == 0 {
-                entity.id = self.$id_gen.next();
+            if entity.inner.id == 0 {
+                entity.inner.id = self.$id_gen.next();
             }
             let rw = self.db.rw_transaction()?;
             rw.insert(entity.clone())?;
@@ -22,8 +24,8 @@ macro_rules! impl_insert {
     (#[allow(dead_code)] $method:ident, $type:ty, $id_gen:ident) => {
         #[allow(dead_code)]
         pub fn $method(&self, mut entity: $type) -> Result<$type> {
-            if entity.id == 0 {
-                entity.id = self.$id_gen.next();
+            if entity.inner.id == 0 {
+                entity.inner.id = self.$id_gen.next();
             }
             let rw = self.db.rw_transaction()?;
             rw.insert(entity.clone())?;
@@ -33,7 +35,6 @@ macro_rules! impl_insert {
     };
 }
 
-// Macro for generating get by ID methods
 macro_rules! impl_get {
     ($method:ident, $type:ty) => {
         pub fn $method(&self, id: u64) -> Result<Option<$type>> {
@@ -50,7 +51,6 @@ macro_rules! impl_get {
     };
 }
 
-// Macro for generating get all methods
 macro_rules! impl_get_all {
     ($method:ident, $type:ty) => {
         pub fn $method(&self) -> Result<Vec<$type>> {
@@ -61,12 +61,11 @@ macro_rules! impl_get_all {
     };
 }
 
-// Macro for generating update methods
 macro_rules! impl_update {
     ($method:ident, $type:ty) => {
         pub fn $method(&self, entity: $type) -> Result<()> {
             let rw = self.db.rw_transaction()?;
-            if let Some(old) = rw.get().primary::<$type>(entity.id)? {
+            if let Some(old) = rw.get().primary::<$type>(entity.inner.id)? {
                 rw.remove(old)?;
             }
             rw.insert(entity)?;
@@ -76,13 +75,12 @@ macro_rules! impl_update {
     };
 }
 
-// Macro for finding max ID
 macro_rules! find_max_id {
     ($tx:expr, $type:ty) => {
         $tx.scan()
             .primary::<$type>()?
             .all()?
-            .map(|e| e.map(|item| item.id).unwrap_or(0))
+            .map(|e| e.map(|item| item.inner.id).unwrap_or(0))
             .max()
             .unwrap_or(0)
     };
@@ -110,10 +108,8 @@ pub struct Database {
 
 impl Database {
     pub fn new(path: &str) -> Result<Self> {
-        // Open or create database using static MODELS
         let db = Builder::new().create(&MODELS, path)?;
 
-        // Scan database to find highest IDs and initialize generators
         let r = db.r_transaction()?;
 
         let max_package_id = find_max_id!(r, Package);
@@ -124,7 +120,6 @@ impl Database {
 
         drop(r);
 
-        // Initialize ID generators starting from max_id + 1
         let package_ids = Arc::new(IdGenerator::new(max_package_id + 1));
         let version_ids = Arc::new(IdGenerator::new(max_version_id + 1));
         let user_ids = Arc::new(IdGenerator::new(max_user_id + 1));
@@ -141,7 +136,6 @@ impl Database {
         })
     }
 
-    // Package operations
     impl_insert!(insert_package, Package, package_ids);
     impl_get!(get_package, Package);
 
@@ -152,14 +146,12 @@ impl Database {
             .secondary(PackageKey::name)?
             .start_with(name)?
             .collect::<Result<Vec<_>, _>>()?;
-
         Ok(results.into_iter().next())
     }
 
     impl_get_all!(get_all_packages, Package);
     impl_update!(update_package, Package);
 
-    // PackageVersion operations
     impl_insert!(insert_version, PackageVersion, version_ids);
     impl_get!(
         #[allow(dead_code)]
@@ -179,7 +171,6 @@ impl Database {
 
     impl_get_all!(get_all_versions, PackageVersion);
 
-    // User operations
     impl_insert!(insert_user, User, user_ids);
     impl_get!(get_user, User);
 
@@ -190,7 +181,6 @@ impl Database {
             .secondary(UserKey::email)?
             .start_with(email)?
             .collect::<Result<Vec<_>, _>>()?;
-
         Ok(results.into_iter().next())
     }
 
@@ -202,14 +192,12 @@ impl Database {
             .secondary(UserKey::username)?
             .start_with(username)?
             .collect::<Result<Vec<_>, _>>()?;
-
         Ok(results.into_iter().next())
     }
 
     impl_get_all!(get_all_users, User);
     impl_update!(update_user, User);
 
-    // Vulnerability operations
     impl_insert!(
         #[allow(dead_code)]
         insert_vulnerability,
@@ -223,7 +211,6 @@ impl Database {
     );
     impl_get_all!(get_all_vulnerabilities, Vulnerability);
 
-    // TimelineEvent operations
     impl_insert!(insert_timeline_event, TimelineEvent, timeline_ids);
     impl_get!(
         #[allow(dead_code)]
@@ -259,14 +246,12 @@ impl Database {
         let r = self.db.r_transaction()?;
         let all_events: Vec<TimelineEvent> =
             r.scan().primary()?.all()?.collect::<Result<Vec<_>, _>>()?;
-        // Filter in memory - native_db doesn't support complex queries
-        // For better scalability, consider adding a compound index or separate pending_notifications table
         Ok(all_events
             .into_iter()
             .filter(|e| {
-                e.user_id.is_some()
-                    && e.notified_at.is_none()
-                    && e.event_type == crate::EventType::NewRelease
+                e.inner.user_id.is_some()
+                    && e.inner.notified_at.is_none()
+                    && e.inner.event_type == crate::EventType::NewRelease
             })
             .collect())
     }
@@ -276,49 +261,41 @@ impl Database {
         Ok(all_users
             .into_iter()
             .filter(|u| {
-                u.subscriptions
+                u.inner
+                    .subscriptions
                     .iter()
                     .any(|s| s.package_name == package_name && s.notifications_enabled)
             })
-            .map(|u| u.id)
+            .map(|u| u.inner.id)
             .collect())
     }
 
-    /// Purge timeline events older than the specified duration
-    /// Returns the number of events deleted
     pub fn purge_old_timeline_events(&self, older_than: chrono::Duration) -> Result<usize> {
         use chrono::Utc;
 
         let cutoff_time = Utc::now() - older_than;
         let r = self.db.r_transaction()?;
 
-        // Get all timeline events
         let all_events: Vec<TimelineEvent> = r
             .scan()
             .primary()?
             .all()?
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Filter events older than cutoff time
         let events_to_delete: Vec<TimelineEvent> = all_events
             .into_iter()
-            .filter(|event| event.created_at < cutoff_time)
+            .filter(|event| event.inner.created_at < cutoff_time)
             .collect();
 
         let delete_count = events_to_delete.len();
 
         if delete_count > 0 {
-            drop(r); // Drop read transaction before starting write transaction
+            drop(r);
             let rw = self.db.rw_transaction()?;
-
             for event in events_to_delete {
                 rw.remove(event)?;
             }
-
             rw.commit()?;
-            tracing::info!("Purged {} old timeline events older than {}", delete_count, cutoff_time);
-        } else {
-            tracing::debug!("No timeline events to purge (cutoff: {})", cutoff_time);
         }
 
         Ok(delete_count)
