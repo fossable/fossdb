@@ -4,7 +4,22 @@ use std::path::Path;
 
 pub fn analyze(path: &Path) -> Result<Vec<AnalysisFinding>> {
     let bytes = std::fs::read(path)?;
-    analyze_bytes(&bytes, path.to_string_lossy().as_ref())
+    let mut findings = analyze_bytes(&bytes, path.to_string_lossy().as_ref())?;
+
+    #[cfg(feature = "analysis-symbolic")]
+    {
+        match super::symbolic::extract_syscalls_program(path) {
+            Ok(syscalls) => {
+                findings.append(&mut super::symbolic::syscalls_to_findings(
+                    &syscalls,
+                    path.to_string_lossy().as_ref(),
+                ));
+            }
+            Err(e) => tracing::debug!("whole-program symbolic analysis skipped: {}", e),
+        }
+    }
+
+    Ok(findings)
 }
 
 pub fn analyze_bytes(bytes: &[u8], name: &str) -> Result<Vec<AnalysisFinding>> {

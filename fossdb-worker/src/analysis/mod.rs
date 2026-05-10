@@ -1,5 +1,7 @@
 pub mod binary;
 pub mod source;
+#[cfg(feature = "analysis-symbolic")]
+pub mod symbolic;
 
 use anyhow::Result;
 use chrono::Utc;

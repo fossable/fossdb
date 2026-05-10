@@ -260,6 +260,7 @@ pub enum FindingKind {
     ChecksumMismatch,
     BinaryMetadata,
     MaliciousPattern,
+    SyscallReachable,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
